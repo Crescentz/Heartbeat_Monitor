@@ -1,0 +1,14 @@
+enabled: true
+id: "local_test_01"
+name: "本机测试服务"
+description: "用于验证监控程序能否正常运行（本机 127.0.0.1:18080）"
+category: "api"
+auto_check: true
+on_failure: "alert"
+
+host: "127.0.0.1"
+test_api: "http://127.0.0.1:18080/health"
+expected_response:
+  ok: true
+timeout_s: 3
+

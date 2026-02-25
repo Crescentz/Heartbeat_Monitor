@@ -1,0 +1,29 @@
+enabled: false
+id: "mineru_01"
+name: "Mineru OCR"
+description: "Mineru PDF OCR 转换服务（GPU）"
+category: "api"
+auto_check: true
+on_failure: "restart"
+plugin: "mineru"
+host: "192.168.1.100"
+ssh_port: 22
+ssh_user: "ubuntu"
+ssh_password: "REPLACE_ME"
+ssh_private_key: ""  # 可选：OpenSSH私钥文本（和 ssh_password 二选一）
+ssh_private_key_path: ""  # 可选：私钥文件路径（和 ssh_password 二选一）
+ssh_private_key_passphrase: ""  # 可选：私钥口令
+sudo_password: "REPLACE_ME"
+sudo: true
+service_type: "docker"
+container_name: "mineru_container"
+test_api: "http://192.168.1.100:8000/REPLACE_ME"
+test_file: "data/test.pdf"
+file_field: "file"
+expected_response: null
+timeout_s: 60
+restart_cmds:
+  - "sudo docker rm -f mineru_container || true"
+  - "sudo docker run --gpus all --shm-size 32g -p 30000:30000 -p 7860:7860 -p 8000:8000 --ipc=host -itd --name mineru_container -e MINERU_MODEL_SOURCE=local mineru:latest /bin/bash"
+  - "sudo docker exec -d mineru_container bash -c \"nohup mineru-api --host 0.0.0.0 --port 8000 > /vllm-workspace/api.log 2>&1 &\""
+

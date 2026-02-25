@@ -1,0 +1,34 @@
+enabled: true
+id: "service_id"
+name: "服务名"
+description: "服务功能描述"
+host: "被监控服务器IP"
+ssh_port: 22
+ssh_user: "ssh用户名"
+ssh_password: "ssh密码"
+ssh_private_key: ""  # OpenSSH 私钥文本（可选，和 ssh_password 二选一）
+ssh_private_key_path: ""  # 私钥文件路径（可选，和 ssh_password 二选一）
+ssh_private_key_passphrase: ""  # 私钥口令（可选）
+ssh_command_wrapper: ""  # 可选，例如：bash -lc（用于 conda activate / source 环境等）
+sudo_password: "sudo密码(可选)"
+service_type: "docker"
+category: "api"  # 可选: api/web/other，用于界面分类展示
+auto_check: true  # 是否参与定时检测
+on_failure: "alert"  # alert=仅提示；restart=失败后自动重启（需要配置 restart_cmds）
+auto_fix: true  # on_failure=restart 时是否执行自动处理
+plugin: ""  # 可选: mineru / 其它自定义插件名；为空则使用通用HTTP检测
+test_api: "http://host:端口/接口路径"
+test_method: "GET"  # GET/POST
+test_payload: {}
+test_file: ""  # 需要上传文件检测时填写，例如 data/test.pdf
+file_field: "file"
+expected_response: {}  # 支持 dict 或 string；为空表示仅校验 2xx
+timeout_s: 30
+sudo: true
+start_cmd: ""
+start_cmds: []
+stop_cmd: ""
+stop_cmds: []
+restart_cmd: ""
+restart_cmds: []
+
