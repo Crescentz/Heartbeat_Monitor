@@ -14,6 +14,7 @@ sudo_password: "sudo密码(可选)"
 service_type: "docker"
 category: "api"  # 可选: api/web/other，用于界面分类展示
 auto_check: true  # 是否参与定时检测
+check_schedule: "30m"
 on_failure: "alert"  # alert=仅提示；restart=失败后自动重启（需要配置 restart_cmds）
 auto_fix: true  # on_failure=restart 时是否执行自动处理
 plugin: ""  # 可选: mineru / 其它自定义插件名；为空则使用通用HTTP检测

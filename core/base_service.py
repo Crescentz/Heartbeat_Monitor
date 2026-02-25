@@ -57,12 +57,14 @@ class BaseService(ABC):
         category = str(self.config.get("category") or self.config.get("service_type") or "api").lower()
         auto_check = bool(self.config.get("auto_check", True))
         on_failure = str(self.config.get("on_failure") or "alert").lower()
+        check_schedule = str(self.config.get("check_schedule") or "").strip()
+        disabled = bool(self.config.get("_disabled", False))
 
         return {
             "id": self.service_id,
             "name": self.name,
             "description": self.description,
-            "status": self.status,
+            "status": "Disabled" if disabled else self.status,
             "last_check": self.last_check.strftime("%Y-%m-%d %H:%M:%S") if self.last_check else "Never",
             "last_error": self.last_error,
             "uptime": uptime_str,
@@ -70,9 +72,11 @@ class BaseService(ABC):
             "category": category,
             "auto_check": auto_check,
             "on_failure": on_failure,
-            "can_start": has_start,
-            "can_stop": has_stop,
-            "can_restart": has_restart,
+            "check_schedule": check_schedule,
+            "disabled": disabled,
+            "can_start": has_start and (not disabled),
+            "can_stop": has_stop and (not disabled),
+            "can_restart": has_restart and (not disabled),
             "host": self.config.get("host") or self.config.get("ip") or "N/A",
             "test_api": self.config.get("test_api") or "",
             "config_path": self.config_path or "",

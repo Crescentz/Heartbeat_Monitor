@@ -6,11 +6,18 @@
   <title>内网服务心跳监控</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
   <style>
-    .status-running { color: #198754; font-weight: 600; }
-    .status-error { color: #dc3545; font-weight: 600; }
-    .status-unknown { color: #6c757d; font-weight: 600; }
+    .status-pill { display: inline-block; padding: 2px 10px; border-radius: 999px; font-weight: 700; letter-spacing: .2px; }
+    .status-running { color: #0f5132; background: rgba(25,135,84,.16); border: 1px solid rgba(25,135,84,.28); }
+    .status-error { color: #842029; background: rgba(220,53,69,.16); border: 1px solid rgba(220,53,69,.28); }
+    .status-disabled { color: #41464b; background: rgba(108,117,125,.14); border: 1px solid rgba(108,117,125,.28); }
+    .status-unknown { color: #055160; background: rgba(13,202,240,.14); border: 1px solid rgba(13,202,240,.28); }
     .log-box { max-height: 280px; overflow-y: auto; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; font-size: 12px; }
     .service-row { cursor: pointer; }
+    .table-responsive { overflow-x: auto; }
+    #servicesTable { min-width: 1600px; table-layout: fixed; }
+    #servicesTable th { position: relative; }
+    .col-resizer { position: absolute; top: 0; right: 0; width: 8px; height: 100%; cursor: col-resize; user-select: none; }
+    .col-resizer::after { content: ""; position: absolute; top: 0; left: 3px; width: 2px; height: 100%; background: rgba(0,0,0,0.08); }
   </style>
 </head>
 <body class="bg-light">
@@ -21,6 +28,12 @@
         <div class="text-muted small">服务数量：<span id="serviceCount">-</span></div>
       </div>
       <div class="d-flex gap-2">
+        <div class="text-muted small align-self-center">用户：{{ user.username }}{% if user.role == "admin" %}（超管）{% endif %}</div>
+        <button class="btn btn-outline-secondary btn-sm" id="changeMyPwd">改密码</button>
+        {% if user.role == "admin" %}
+        <button class="btn btn-outline-primary btn-sm" id="openAdmin">管理</button>
+        {% endif %}
+        <a class="btn btn-outline-secondary btn-sm" href="/logout">退出</a>
         <button class="btn btn-outline-secondary btn-sm" onclick="location.reload()">刷新</button>
       </div>
     </div>
@@ -64,15 +77,16 @@
       <div class="card-header">服务状态</div>
       <div class="card-body p-0">
         <div class="table-responsive">
-          <table class="table table-hover mb-0 align-middle">
+          <table class="table table-hover mb-0 align-middle" id="servicesTable">
             <thead class="table-light">
               <tr>
                 <th style="width: 70px;">序号</th>
                 <th style="width: 220px;">服务</th>
                 <th style="width: 90px;">类别</th>
                 <th style="width: 120px;">策略</th>
+                <th style="width: 110px;">频率</th>
                 <th style="width: 120px;">状态</th>
-                <th>检测地址</th>
+                <th style="width: 420px;">检测地址</th>
                 <th style="width: 140px;">运行时长</th>
                 <th style="width: 120px;">故障率</th>
                 <th style="width: 180px;">最后检测</th>
@@ -94,17 +108,36 @@
     </div>
 
     <div class="card shadow-sm">
-      <div class="card-header">最近 10 条错误日志</div>
+      <div class="card-header">
+        <ul class="nav nav-tabs card-header-tabs" role="tablist">
+          <li class="nav-item" role="presentation">
+            <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tabErrors" type="button" role="tab">错误日志</button>
+          </li>
+          <li class="nav-item" role="presentation">
+            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabEvents" type="button" role="tab">事件日志</button>
+          </li>
+        </ul>
+      </div>
       <div class="card-body">
-        <div class="log-box border rounded p-2 bg-white" id="errorsBox"></div>
+        <div class="tab-content">
+          <div class="tab-pane fade show active" id="tabErrors" role="tabpanel">
+            <div class="log-box border rounded p-2 bg-white" id="errorsBox"></div>
+          </div>
+          <div class="tab-pane fade" id="tabEvents" role="tabpanel">
+            <div class="log-box border rounded p-2 bg-white" id="eventsBox"></div>
+          </div>
+        </div>
       </div>
     </div>
   </div>
 
-  <div id="modalsRoot"></div>
+  <div id="detailModalsRoot"></div>
+  <div id="overlayModalsRoot"></div>
 
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
   <script>
+    const currentUser = {{ user | tojson }};
+
     function escapeHtml(x) {
       return String(x)
         .replaceAll("&", "&amp;")
@@ -117,7 +150,58 @@
     function statusClass(s) {
       if (s === "Running") return "status-running";
       if (s === "Error") return "status-error";
+      if (s === "Disabled") return "status-disabled";
       return "status-unknown";
+    }
+
+    function safeId(s) {
+      return String(s).replaceAll(/[^a-zA-Z0-9_-]/g, "_");
+    }
+
+    function initResizableColumns(tableId, storageKey) {
+      const table = document.getElementById(tableId);
+      if (!table) return;
+      const header = table.querySelector("thead tr");
+      if (!header) return;
+      const ths = Array.from(header.querySelectorAll("th"));
+
+      const saved = (() => {
+        try { return JSON.parse(localStorage.getItem(storageKey) || "{}"); } catch { return {}; }
+      })();
+      ths.forEach((th, idx) => {
+        const w = saved[String(idx)];
+        if (w && Number.isFinite(w)) th.style.width = `${w}px`;
+      });
+
+      ths.forEach((th, idx) => {
+        if (th.querySelector(".col-resizer")) return;
+        const resizer = document.createElement("div");
+        resizer.className = "col-resizer";
+        th.appendChild(resizer);
+
+        resizer.addEventListener("mousedown", (e) => {
+          e.preventDefault();
+          const startX = e.clientX;
+          const startW = th.getBoundingClientRect().width;
+
+          const onMove = (ev) => {
+            const next = Math.max(50, Math.round(startW + (ev.clientX - startX)));
+            th.style.width = `${next}px`;
+          };
+          const onUp = () => {
+            const widths = {};
+            ths.forEach((x, i) => {
+              widths[String(i)] = Math.round(x.getBoundingClientRect().width);
+            });
+            try { localStorage.setItem(storageKey, JSON.stringify(widths)); } catch {}
+            window.removeEventListener("mousemove", onMove);
+            window.removeEventListener("mouseup", onUp);
+          };
+
+          window.addEventListener("mousemove", onMove);
+          window.addEventListener("mouseup", onUp);
+        });
+      });
     }
 
     const state = {
@@ -128,17 +212,18 @@
       page_size: 5
     };
 
-    async function controlService(serviceId, action) {
-      const resp = await fetch(`/api/control/${serviceId}/${action}`, { method: 'POST' });
-      const data = await resp.json();
-      alert(data.message || (data.success ? 'OK' : 'Failed'));
-      await loadAll();
-    }
-
     function policyBadge(s) {
       if (!s.auto_check) return `<span class="badge text-bg-secondary">不自动</span>`;
-      if (String(s.on_failure || "").toLowerCase() === "restart") return `<span class="badge text-bg-warning">失败重启</span>`;
-      return `<span class="badge text-bg-info">仅提示</span>`;
+      if (String(s.on_failure || "").toLowerCase() === "restart") return `<span class="badge bg-light border border-warning text-warning">失败重启</span>`;
+      return `<span class="badge bg-light border text-secondary">仅提示</span>`;
+    }
+
+    function openDetailModal(serviceId) {
+      const id = `detailModal_${safeId(serviceId)}`;
+      const el = document.getElementById(id);
+      if (!el) return;
+      const modal = bootstrap.Modal.getOrCreateInstance(el);
+      modal.show();
     }
 
     function renderServices(services, total, pages) {
@@ -148,8 +233,8 @@
 
       const body = document.getElementById("servicesBody");
       if (!services || services.length === 0) {
-        body.innerHTML = `<tr><td colspan="10" class="text-center text-muted py-4">暂无匹配服务</td></tr>`;
-        document.getElementById("modalsRoot").innerHTML = "";
+        body.innerHTML = `<tr><td colspan="11" class="text-center text-muted py-4">暂无匹配服务</td></tr>`;
+        document.getElementById("detailModalsRoot").innerHTML = "";
         return;
       }
 
@@ -159,13 +244,17 @@
         const testApi = escapeHtml(s.test_api || "");
         const host = escapeHtml(s.host || "");
         const name = escapeHtml(s.name || s.id || "");
-        const status = escapeHtml(s.status || "");
-        const statusCls = statusClass(s.status);
+        const sched = escapeHtml(s.check_schedule || "");
         const canStart = !!s.can_start;
         const canStop = !!s.can_stop;
         const canRestart = !!s.can_restart;
+        const sidJson = JSON.stringify(String(s.id || ""));
+        const disabled = !!s.disabled;
+        const statusText = disabled ? "Disabled" : (s.status || "");
+        const statusCls = statusClass(statusText);
+        const disabledBadge = disabled ? `<span class="badge text-bg-secondary ms-2">已禁用</span>` : "";
         return `
-          <tr class="service-row" data-bs-toggle="modal" data-bs-target="#detailModal_${escapeHtml(s.id)}">
+          <tr class="service-row" onclick='openDetailModal(${sidJson})'>
             <td class="text-muted">${seq}</td>
             <td>
               <div class="fw-semibold">${name}</div>
@@ -173,28 +262,36 @@
             </td>
             <td class="text-muted small">${cat}</td>
             <td>${policyBadge(s)}</td>
-            <td><span class="${statusCls}">${status}</span></td>
+            <td><code>${sched || "30m(默认)"}</code></td>
+            <td><span class="status-pill ${statusCls}">${escapeHtml(statusText)}${disabledBadge}</span></td>
             <td class="text-truncate" style="max-width: 360px;">${testApi}</td>
             <td>${escapeHtml(s.uptime || "")}</td>
             <td>${escapeHtml(s.failure_rate || "")}</td>
             <td>${escapeHtml(s.last_check || "")}</td>
             <td>
-              <div class="d-flex gap-1" onclick="event.stopPropagation()">
-                <button class="btn btn-success btn-sm" ${canStart ? "" : "disabled"} onclick="controlService('${escapeHtml(s.id)}','start')">启动</button>
-                <button class="btn btn-danger btn-sm" ${canStop ? "" : "disabled"} onclick="controlService('${escapeHtml(s.id)}','stop')">停止</button>
-                <button class="btn btn-warning btn-sm" ${canRestart ? "" : "disabled"} onclick="controlService('${escapeHtml(s.id)}','restart')">重启</button>
-                <button class="btn btn-info btn-sm" onclick="controlService('${escapeHtml(s.id)}','check')">检测</button>
+              <div class="d-flex gap-1 no-detail" onclick="event.stopPropagation()">
+                <button class="btn btn-success btn-sm" ${canStart && !disabled ? "" : "disabled"} onclick='event.stopPropagation(); showActionModal(${sidJson},"start")'>启动</button>
+                <button class="btn btn-danger btn-sm" ${canStop && !disabled ? "" : "disabled"} onclick='event.stopPropagation(); showActionModal(${sidJson},"stop")'>停止</button>
+                <button class="btn btn-warning btn-sm" ${canRestart && !disabled ? "" : "disabled"} onclick='event.stopPropagation(); showActionModal(${sidJson},"restart")'>重启</button>
+                <button class="btn btn-info btn-sm" ${!disabled ? "" : "disabled"} onclick='event.stopPropagation(); showActionModal(${sidJson},"check")'>检测</button>
+                ${currentUser && currentUser.role === "admin" ? `<button class="btn btn-outline-secondary btn-sm" onclick='event.stopPropagation(); toggleDisabled(${sidJson}, ${disabled ? "false" : "true"})'>${disabled ? "启用" : "禁用"}</button>` : ""}
               </div>
             </td>
           </tr>
         `;
       }).join("");
 
-      const modalsRoot = document.getElementById("modalsRoot");
+      const anyModalOpen = !!document.querySelector(".modal.show");
+      if (anyModalOpen) return;
+
+      const modalsRoot = document.getElementById("detailModalsRoot");
       modalsRoot.innerHTML = services.map(s => {
         const detail = escapeHtml(JSON.stringify(s.last_test_detail || {}, null, 2));
+        const sidJson = JSON.stringify(String(s.id || ""));
+        const nameJson = JSON.stringify(String(s.name || s.id || ""));
+        const modalDomId = `detailModal_${safeId(s.id || "")}`;
         return `
-          <div class="modal fade" id="detailModal_${escapeHtml(s.id)}" tabindex="-1" aria-hidden="true">
+          <div class="modal fade" id="${modalDomId}" tabindex="-1" aria-hidden="true">
             <div class="modal-dialog modal-lg modal-dialog-scrollable">
               <div class="modal-content">
                 <div class="modal-header">
@@ -206,13 +303,15 @@
                   <div class="mb-2"><span class="text-muted">配置文件：</span><code>${escapeHtml(s.config_path || "")}</code></div>
                   <div class="mb-2"><span class="text-muted">类别：</span><code>${escapeHtml(s.category || "")}</code></div>
                   <div class="mb-2"><span class="text-muted">自动检测：</span><code>${escapeHtml(String(!!s.auto_check))}</code></div>
+                  <div class="mb-2"><span class="text-muted">检测频率：</span><code>${escapeHtml(s.check_schedule || "") || "30m(默认)"}</code></div>
                   <div class="mb-2"><span class="text-muted">失败策略：</span><code>${escapeHtml(s.on_failure || "")}</code></div>
                   <div class="mb-2"><span class="text-muted">检测地址：</span><code>${escapeHtml(s.test_api || "")}</code></div>
                   <div class="mb-2"><span class="text-muted">API 测试结果：</span></div>
                   <pre class="border rounded p-2 bg-light mb-0" style="white-space: pre-wrap;">${detail}</pre>
                   ${s.last_error ? `<div class="alert alert-danger mt-3 mb-0"><div class="fw-semibold">最后错误</div><div>${escapeHtml(s.last_error)}</div></div>` : ""}
                   <div class="d-flex justify-content-end mt-3">
-                    <button class="btn btn-outline-primary btn-sm" onclick="openServiceLogs('${escapeHtml(s.id)}','${escapeHtml(s.name || s.id)}')">查看该服务7天错误日志</button>
+                    <button class="btn btn-outline-primary btn-sm" onclick='openServiceLogs(${sidJson},${nameJson})'>查看该服务7天错误日志</button>
+                    <button class="btn btn-outline-secondary btn-sm ms-2" onclick='openServiceEventLogs(${sidJson},${nameJson})'>查看该服务7天事件日志</button>
                   </div>
                 </div>
               </div>
@@ -220,6 +319,133 @@
           </div>
         `;
       }).join("");
+    }
+
+    async function fetchJson(url, options) {
+      const resp = await fetch(url, options || {});
+      if (resp.status === 401) {
+        location.href = "/login";
+        throw new Error("unauthorized");
+      }
+      const text = await resp.text();
+      let data = {};
+      try {
+        data = text ? JSON.parse(text) : {};
+      } catch {
+        data = {};
+      }
+      if (!resp.ok) {
+        throw new Error(data.error || data.message || `HTTP ${resp.status}`);
+      }
+      if (Object.prototype.hasOwnProperty.call(data, "success") && data.success === false) {
+        throw new Error(data.message || "failed");
+      }
+      return data;
+    }
+
+    const actionState = { service_id: "", action: "", open: false, timer: null };
+
+    async function showActionModal(serviceId, action) {
+      actionState.service_id = String(serviceId || "");
+      actionState.action = String(action || "");
+      ensureActionModal();
+      updateActionModal({ title: `操作：${escapeHtml(actionState.action)} - ${escapeHtml(actionState.service_id)}`, status: "执行中...", message: "" });
+      const modalEl = document.getElementById("actionModal");
+      const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
+      modal.show();
+
+      if (actionState.timer) {
+        clearInterval(actionState.timer);
+        actionState.timer = null;
+      }
+      actionState.open = true;
+      actionState.timer = setInterval(() => {
+        if (!actionState.open) return;
+        refreshActionModalLogs().catch(() => {});
+      }, 1000);
+
+      try {
+        await refreshActionModalLogs();
+        const url = `/api/control/${encodeURIComponent(actionState.service_id)}/${encodeURIComponent(actionState.action)}`;
+        const data = await fetchJson(url, { method: "POST" });
+        updateActionModal({ status: "已提交", message: escapeHtml(data.message || "ok") });
+        await loadAll();
+        await refreshActionModalLogs();
+      } catch (e) {
+        updateActionModal({ status: "失败", message: escapeHtml(String(e && e.message ? e.message : e)) });
+      }
+    }
+
+    function ensureActionModal() {
+      if (document.getElementById("actionModal")) return;
+      const root = document.getElementById("overlayModalsRoot");
+      root.insertAdjacentHTML("beforeend", `
+        <div class="modal fade" id="actionModal" tabindex="-1" aria-hidden="true">
+          <div class="modal-dialog modal-lg modal-dialog-scrollable">
+            <div class="modal-content">
+              <div class="modal-header">
+                <h5 class="modal-title" id="actionModalTitle">操作</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+              </div>
+              <div class="modal-body">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                  <div class="text-muted small">状态：<span id="actionModalStatus">-</span></div>
+                  <div class="text-muted small">服务：<code id="actionModalService">-</code></div>
+                </div>
+                <div class="alert alert-light border mb-3">
+                  <div class="fw-semibold mb-1">返回信息</div>
+                  <div id="actionModalMessage" class="small text-break">-</div>
+                </div>
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                  <div class="fw-semibold">最近事件</div>
+                  <button class="btn btn-outline-secondary btn-sm" id="actionModalRefreshBtn">刷新</button>
+                </div>
+                <div class="log-box border rounded p-2 bg-white" id="actionModalEventsBox"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      `);
+      document.getElementById("actionModalRefreshBtn").onclick = async () => {
+        await refreshActionModalLogs();
+      };
+      document.getElementById("actionModal").addEventListener("hidden.bs.modal", () => {
+        actionState.open = false;
+        if (actionState.timer) {
+          clearInterval(actionState.timer);
+          actionState.timer = null;
+        }
+      });
+    }
+
+    function updateActionModal(patch) {
+      if (!document.getElementById("actionModal")) return;
+      if (patch.title !== undefined) document.getElementById("actionModalTitle").textContent = patch.title;
+      document.getElementById("actionModalService").textContent = actionState.service_id || "-";
+      if (patch.status !== undefined) document.getElementById("actionModalStatus").textContent = patch.status;
+      if (patch.message !== undefined) document.getElementById("actionModalMessage").innerHTML = patch.message || "-";
+    }
+
+    async function refreshActionModalLogs() {
+      if (!actionState.service_id) return;
+      const qs = new URLSearchParams({ service_id: actionState.service_id, page: "1", page_size: "30", days: "7" });
+      const data = await fetchJson(`/api/events?${qs.toString()}`);
+      const items = data.events || [];
+      const box = document.getElementById("actionModalEventsBox");
+      if (!box) return;
+      box.innerHTML = items.length
+        ? items.map(e => `<div>[${escapeHtml(e.ts || "")}] [${escapeHtml(String(e.level || "").toUpperCase())}] ${escapeHtml(e.action || "")}: ${escapeHtml(e.message || "")}</div>`).join("")
+        : `<div class="text-muted">暂无事件</div>`;
+    }
+
+    async function toggleDisabled(serviceId, disabled) {
+      const sid = String(serviceId || "");
+      await fetchJson("/api/admin/disabled", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ service_id: sid, disabled: !!disabled })
+      });
+      await loadAll();
     }
 
     async function fetchServices() {
@@ -230,13 +456,15 @@
         page: String(state.page),
         page_size: String(state.page_size)
       });
-      const resp = await fetch(`/api/services?${qs.toString()}`);
-      return await resp.json();
+      return await fetchJson(`/api/services?${qs.toString()}`);
     }
 
     async function fetchRecentErrors() {
-      const resp = await fetch(`/api/errors?n=10&days=7`);
-      return await resp.json();
+      return await fetchJson(`/api/errors?n=10&days=7`);
+    }
+
+    async function fetchRecentEvents() {
+      return await fetchJson(`/api/events?n=30&days=7`);
     }
 
     function renderErrors(errors) {
@@ -246,15 +474,41 @@
         return;
       }
       box.innerHTML = errors.map(e => {
-        const sid = escapeHtml(e.service_id || "");
-        const sname = escapeHtml(e.service_name || "");
+        const sid = String(e.service_id || "");
+        const sname = String(e.service_name || "");
+        const sidHtml = escapeHtml(sid);
+        const snameHtml = escapeHtml(sname);
+        const sidJson = JSON.stringify(sid);
+        const snameJson = JSON.stringify(sname);
         const ts = escapeHtml(e.ts || "");
         const reason = escapeHtml(e.reason || "");
-        return `<div>[${ts}] <a href="javascript:void(0)" onclick="openServiceLogs('${sid}','${sname}')">${sname} (${sid})</a>: ${reason}</div>`;
+        return `<div>[${ts}] <a href="javascript:void(0)" onclick='openServiceLogs(${sidJson},${snameJson})'>${snameHtml} (${sidHtml})</a>: ${reason}</div>`;
+      }).join("");
+    }
+
+    function renderEvents(events) {
+      const box = document.getElementById("eventsBox");
+      if (!events || events.length === 0) {
+        box.innerHTML = `<div class="text-muted">暂无事件日志</div>`;
+        return;
+      }
+      box.innerHTML = events.map(e => {
+        const sid = String(e.service_id || "");
+        const sname = String(e.service_name || "");
+        const sidHtml = escapeHtml(sid);
+        const snameHtml = escapeHtml(sname);
+        const sidJson = JSON.stringify(sid);
+        const snameJson = JSON.stringify(sname);
+        const ts = escapeHtml(e.ts || "");
+        const level = escapeHtml(String(e.level || "").toUpperCase());
+        const action = escapeHtml(e.action || "");
+        const msg = escapeHtml(e.message || "");
+        return `<div>[${ts}] [${level}] <a href="javascript:void(0)" onclick='openServiceEventLogs(${sidJson},${snameJson})'>${snameHtml} (${sidHtml})</a> ${action}: ${msg}</div>`;
       }).join("");
     }
 
     const logsState = { service_id: "", service_name: "", page: 1, page_size: 20 };
+    const eventLogsState = { service_id: "", service_name: "", page: 1, page_size: 30 };
 
     async function fetchServiceLogs() {
       const qs = new URLSearchParams({
@@ -263,8 +517,7 @@
         page_size: String(logsState.page_size),
         days: "7"
       });
-      const resp = await fetch(`/api/errors?${qs.toString()}`);
-      return await resp.json();
+      return await fetchJson(`/api/errors?${qs.toString()}`);
     }
 
     async function openServiceLogs(serviceId, serviceName) {
@@ -272,6 +525,13 @@
       logsState.service_name = serviceName;
       logsState.page = 1;
       await showLogsModal();
+    }
+
+    async function openServiceEventLogs(serviceId, serviceName) {
+      eventLogsState.service_id = serviceId;
+      eventLogsState.service_name = serviceName;
+      eventLogsState.page = 1;
+      await showEventLogsModal();
     }
 
     async function showLogsModal() {
@@ -284,7 +544,7 @@
         ? items.map(e => `<div>[${escapeHtml(e.ts || "")}] ${escapeHtml(e.reason || "")}</div>`).join("")
         : `<div class="text-muted">暂无错误日志</div>`;
 
-      const root = document.getElementById("modalsRoot");
+      const root = document.getElementById("overlayModalsRoot");
       root.insertAdjacentHTML("beforeend", `
         <div class="modal fade" id="${modalId}" tabindex="-1" aria-hidden="true">
           <div class="modal-dialog modal-lg modal-dialog-scrollable">
@@ -332,15 +592,87 @@
       };
     }
 
-    async function loadAll() {
-      const servicesData = await fetchServices();
-      renderServices(servicesData.services || [], servicesData.total || 0, servicesData.pages || 1);
-      const errorsData = await fetchRecentErrors();
-      renderErrors(errorsData.errors || []);
+    async function fetchServiceEventLogs() {
+      const qs = new URLSearchParams({
+        service_id: eventLogsState.service_id,
+        page: String(eventLogsState.page),
+        page_size: String(eventLogsState.page_size),
+        days: "7"
+      });
+      return await fetchJson(`/api/events?${qs.toString()}`);
+    }
 
-      const pages = servicesData.pages || 1;
-      document.getElementById("pagePrev").disabled = state.page <= 1;
-      document.getElementById("pageNext").disabled = state.page >= pages;
+    async function showEventLogsModal() {
+      const data = await fetchServiceEventLogs();
+      const modalId = "serviceEventLogsModal";
+      const title = `${escapeHtml(eventLogsState.service_name)} (${escapeHtml(eventLogsState.service_id)}) - 7天事件日志`;
+      const pages = data.pages || 1;
+      const items = data.events || [];
+      const content = items.length
+        ? items.map(e => `<div>[${escapeHtml(e.ts || "")}] [${escapeHtml(String(e.level || "").toUpperCase())}] ${escapeHtml(e.action || "")}: ${escapeHtml(e.message || "")}</div>`).join("")
+        : `<div class="text-muted">暂无事件日志</div>`;
+
+      const root = document.getElementById("overlayModalsRoot");
+      root.insertAdjacentHTML("beforeend", `
+        <div class="modal fade" id="${modalId}" tabindex="-1" aria-hidden="true">
+          <div class="modal-dialog modal-lg modal-dialog-scrollable">
+            <div class="modal-content">
+              <div class="modal-header">
+                <h5 class="modal-title">${title}</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+              </div>
+              <div class="modal-body">
+                <div class="log-box border rounded p-2 bg-white">${content}</div>
+                <div class="d-flex justify-content-between align-items-center mt-3">
+                  <div class="text-muted small">第 ${eventLogsState.page}/${pages} 页</div>
+                  <div class="btn-group btn-group-sm" role="group">
+                    <button class="btn btn-outline-secondary" id="eventLogPrev" ${eventLogsState.page <= 1 ? "disabled" : ""}>上一页</button>
+                    <button class="btn btn-outline-secondary" id="eventLogNext" ${eventLogsState.page >= pages ? "disabled" : ""}>下一页</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      `);
+      const modal = new bootstrap.Modal(document.getElementById(modalId));
+      modal.show();
+      document.getElementById("eventLogPrev").onclick = async () => {
+        if (eventLogsState.page <= 1) return;
+        eventLogsState.page -= 1;
+        document.getElementById(modalId).remove();
+        await showEventLogsModal();
+      };
+      document.getElementById("eventLogNext").onclick = async () => {
+        if (eventLogsState.page >= pages) return;
+        eventLogsState.page += 1;
+        document.getElementById(modalId).remove();
+        await showEventLogsModal();
+      };
+      document.getElementById(modalId).addEventListener("hidden.bs.modal", () => {
+        document.getElementById(modalId).remove();
+      });
+    }
+
+    async function loadAll() {
+      try {
+        const servicesData = await fetchServices();
+        renderServices(servicesData.services || [], servicesData.total || 0, servicesData.pages || 1);
+        const errorsData = await fetchRecentErrors();
+        renderErrors(errorsData.errors || []);
+        const eventsData = await fetchRecentEvents();
+        renderEvents(eventsData.events || []);
+
+        const pages = servicesData.pages || 1;
+        document.getElementById("pagePrev").disabled = state.page <= 1;
+        document.getElementById("pageNext").disabled = state.page >= pages;
+      } catch (e) {
+        try {
+          const msg = String(e && e.message ? e.message : e);
+          const box = document.getElementById("errorsBox");
+          if (box) box.innerHTML = `<div class="text-danger">刷新失败：${escapeHtml(msg)}</div>`;
+        } catch {}
+      }
     }
 
     function bindFilters() {
@@ -372,8 +704,237 @@
       };
     }
 
+    initResizableColumns("servicesTable", "hbmon_servicesTable_colwidths");
     bindFilters();
     loadAll();
+
+    setInterval(() => {
+      const anyModalOpen = !!document.querySelector(".modal.show");
+      if (anyModalOpen) return;
+      if (state.inflight) return;
+      loadAll();
+    }, 3000);
+
+    async function adminFetch(url, options) {
+      const resp = await fetch(url, options || {});
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) throw new Error(data.error || data.message || `HTTP ${resp.status}`);
+      return data;
+    }
+
+    function ensureAdminModal() {
+      if (document.getElementById("adminModal")) return;
+      document.getElementById("overlayModalsRoot").insertAdjacentHTML("beforeend", `
+        <div class="modal fade" id="adminModal" tabindex="-1" aria-hidden="true">
+          <div class="modal-dialog modal-xl modal-dialog-scrollable">
+            <div class="modal-content">
+              <div class="modal-header">
+                <h5 class="modal-title">管理</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+              </div>
+              <div class="modal-body">
+                <ul class="nav nav-tabs" role="tablist">
+                  <li class="nav-item" role="presentation"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tabUsers" type="button" role="tab">用户</button></li>
+                  <li class="nav-item" role="presentation"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabBindings" type="button" role="tab">服务绑定</button></li>
+                </ul>
+                <div class="tab-content pt-3">
+                  <div class="tab-pane fade show active" id="tabUsers" role="tabpanel">
+                    <div class="row g-3">
+                      <div class="col-12 col-lg-4">
+                        <div class="card">
+                          <div class="card-header">新建用户</div>
+                          <div class="card-body">
+                            <div class="mb-2">
+                              <label class="form-label mb-1">账号</label>
+                              <input class="form-control form-control-sm" id="newUserName">
+                            </div>
+                            <div class="mb-2">
+                              <label class="form-label mb-1">密码</label>
+                              <input class="form-control form-control-sm" id="newUserPwd" type="password">
+                            </div>
+                            <div class="mb-3">
+                              <label class="form-label mb-1">角色</label>
+                              <select class="form-select form-select-sm" id="newUserRole">
+                                <option value="user">普通用户</option>
+                                <option value="admin">超管</option>
+                              </select>
+                            </div>
+                            <button class="btn btn-primary btn-sm w-100" id="createUserBtn">创建</button>
+                          </div>
+                        </div>
+                      </div>
+                      <div class="col-12 col-lg-8">
+                        <div class="card">
+                          <div class="card-header d-flex justify-content-between align-items-center">
+                            <div>用户列表</div>
+                            <button class="btn btn-outline-secondary btn-sm" id="reloadUsersBtn">刷新</button>
+                          </div>
+                          <div class="card-body p-0">
+                            <div class="table-responsive">
+                              <table class="table table-sm mb-0 align-middle">
+                                <thead class="table-light"><tr><th>账号</th><th>角色</th><th style="width: 220px;">操作</th></tr></thead>
+                                <tbody id="usersBody"></tbody>
+                              </table>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="tab-pane fade" id="tabBindings" role="tabpanel">
+                    <div class="card">
+                      <div class="card-header d-flex justify-content-between align-items-center">
+                        <div>服务绑定（填写账号，多个用英文逗号分隔）</div>
+                        <button class="btn btn-outline-secondary btn-sm" id="reloadBindingsBtn">刷新</button>
+                      </div>
+                      <div class="card-body p-0">
+                        <div class="table-responsive">
+                          <table class="table table-sm mb-0 align-middle">
+                            <thead class="table-light"><tr><th style="width: 220px;">服务ID</th><th>绑定用户</th><th style="width: 180px;">检测频率</th><th style="width: 140px;">操作</th></tr></thead>
+                            <tbody id="bindingsBody"></tbody>
+                          </table>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      `);
+    }
+
+    async function loadUsers() {
+      const data = await adminFetch("/api/admin/users");
+      const body = document.getElementById("usersBody");
+      body.innerHTML = (data.users || []).map(u => {
+        const username = String(u.username || "");
+        const name = escapeHtml(username);
+        const role = escapeHtml(u.role || "");
+        const disabled = username === "admin" ? "disabled" : "";
+        const usernameJson = JSON.stringify(username);
+        return `<tr>
+          <td><code>${name}</code></td>
+          <td>${role}</td>
+          <td>
+            <div class="d-flex gap-1">
+              <button class="btn btn-outline-primary btn-sm" onclick='resetUserPwd(${usernameJson})' ${disabled}>改密码</button>
+              <button class="btn btn-outline-danger btn-sm" onclick='deleteUser(${usernameJson})' ${disabled}>删除</button>
+            </div>
+          </td>
+        </tr>`;
+      }).join("") || `<tr><td colspan="3" class="text-center text-muted py-3">暂无用户</td></tr>`;
+    }
+
+    async function loadBindings() {
+      const data = await adminFetch("/api/admin/bindings");
+      const schedules = await adminFetch("/api/admin/schedules");
+      const bindings = data.bindings || {};
+      const base = schedules.base || {};
+      const overrides = schedules.overrides || {};
+      const services = data.services || [];
+      const body = document.getElementById("bindingsBody");
+      body.innerHTML = services.map(sid => {
+        const v = (bindings[sid] || []).join(",");
+        const sidKey = safeId(sid);
+        const sidJson = JSON.stringify(String(sid));
+        const scheduleValue = String(overrides[sid] || base[sid] || "").trim();
+        return `<tr>
+          <td><code>${escapeHtml(sid)}</code></td>
+          <td><input class="form-control form-control-sm" value="${escapeHtml(v)}" id="bind_${sidKey}"></td>
+          <td><input class="form-control form-control-sm" value="${escapeHtml(scheduleValue)}" placeholder="30m / 10s / daily@02:30" id="sched_${sidKey}"></td>
+          <td><button class="btn btn-primary btn-sm" onclick='saveBinding(${sidJson})'>保存</button></td>
+        </tr>`;
+      }).join("") || `<tr><td colspan="4" class="text-center text-muted py-3">暂无服务</td></tr>`;
+    }
+
+    async function createUser() {
+      const username = document.getElementById("newUserName").value.trim();
+      const password = document.getElementById("newUserPwd").value;
+      const role = document.getElementById("newUserRole").value;
+      const data = await adminFetch("/api/admin/users", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password, role })
+      });
+      alert(data.message || "ok");
+      document.getElementById("newUserName").value = "";
+      document.getElementById("newUserPwd").value = "";
+      await loadUsers();
+      await loadBindings();
+    }
+
+    async function deleteUser(username) {
+      if (!confirm(`确认删除用户 ${username}？`)) return;
+      const data = await adminFetch(`/api/admin/users/${encodeURIComponent(username)}`, { method: "DELETE" });
+      alert(data.message || "ok");
+      await loadUsers();
+      await loadBindings();
+    }
+
+    async function resetUserPwd(username) {
+      const pwd = prompt(`为 ${username} 设置新密码（至少4位）：`);
+      if (!pwd) return;
+      const data = await adminFetch(`/api/admin/users/${encodeURIComponent(username)}/password`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password: pwd })
+      });
+      alert(data.message || "ok");
+    }
+
+    async function saveBinding(serviceId) {
+      const el = document.getElementById(`bind_${safeId(serviceId)}`);
+      const schedEl = document.getElementById(`sched_${safeId(serviceId)}`);
+      const users = String(el.value || "")
+        .split(",")
+        .map(x => x.trim())
+        .filter(Boolean);
+      const data = await adminFetch("/api/admin/bindings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ service_id: serviceId, users })
+      });
+      const check_schedule = String(schedEl ? schedEl.value : "").trim();
+      await adminFetch("/api/admin/schedules", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ service_id: serviceId, check_schedule })
+      });
+      alert(data.message || "ok");
+      await loadAll();
+    }
+
+    if (currentUser && currentUser.role === "admin") {
+      const btn = document.getElementById("openAdmin");
+      if (btn) {
+        btn.onclick = async () => {
+          ensureAdminModal();
+          document.getElementById("createUserBtn").onclick = createUser;
+          document.getElementById("reloadUsersBtn").onclick = loadUsers;
+          document.getElementById("reloadBindingsBtn").onclick = loadBindings;
+          await loadUsers();
+          await loadBindings();
+          const modal = new bootstrap.Modal(document.getElementById("adminModal"));
+          modal.show();
+        };
+      }
+    }
+
+    const changePwdBtn = document.getElementById("changeMyPwd");
+    if (changePwdBtn) {
+      changePwdBtn.onclick = async () => {
+        const pwd = prompt("设置新密码（至少4位）：");
+        if (!pwd) return;
+        const data = await adminFetch("/api/me/password", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ password: pwd })
+        });
+        alert(data.message || "ok");
+      };
+    }
   </script>
 </body>
 </html>

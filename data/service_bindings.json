@@ -1,0 +1,11 @@
+{
+  "bindings": {
+    "local_test_01": [
+      "test01",
+      "test03"
+    ],
+    "local_restart_demo": [
+      "test02"
+    ]
+  }
+}

@@ -1,0 +1,18 @@
+enabled: false
+id: "local_test_managed"
+name: "本机测试服务（可启停）"
+description: "由监控程序本机启动/停止/重启 local_test_service.py（18080）。启用前请不要手动运行该脚本，避免端口冲突"
+category: "api"
+auto_check: true
+check_schedule: "10s"
+on_failure: "alert"
+plugin: "localproc"
+
+host: "127.0.0.1"
+test_api: "http://127.0.0.1:18080/health"
+expected_response:
+  ok: true
+timeout_s: 2
+
+local_script: "local_test_service.py"
+local_args: []

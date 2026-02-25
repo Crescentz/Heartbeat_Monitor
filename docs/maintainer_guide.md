@@ -5,7 +5,7 @@
   - 依赖检查（未安装时提示安装 requirements）
   - 目录初始化（data/logs）
   - 加载服务：`config/services/*.yaml`
-  - 启动定时检测（默认 30 分钟一次）
+  - 启动定时检测（按服务独立建 job；未配置 `check_schedule` 时默认 30m）
   - 启动 Flask Web
 
 ## 2. 服务加载机制（新增服务不改 main.py）
@@ -29,12 +29,15 @@
   - `auto_check: false` 的服务不参与定时检测（仍可手工点“检测”）
   - `on_failure: alert`：仅记录错误
   - `on_failure: restart`：失败后尝试执行 `restart_service()`（要求配置了 restart 命令）
-  - 自动处理结果会合并到 `last_test_detail` 并额外写入错误日志
+  - 自动处理结果会额外写入错误日志（目前不合并到 `last_test_detail`）
 
 ## 5. Web 运维界面
 - 后端路由：[webapp.py](file:///d:/CODE/PyCODE/Heartbeat_Monitor/monitor/webapp.py)
 - 模板：[index.html](file:///d:/CODE/PyCODE/Heartbeat_Monitor/templates/index.html)
 - 错误日志：[error_log.py](file:///d:/CODE/PyCODE/Heartbeat_Monitor/core/error_log.py)
+- 事件日志：[event_log.py](file:///d:/CODE/PyCODE/Heartbeat_Monitor/core/event_log.py)
+- 账号与权限：[user_store.py](file:///d:/CODE/PyCODE/Heartbeat_Monitor/core/user_store.py)、[acl_store.py](file:///d:/CODE/PyCODE/Heartbeat_Monitor/core/acl_store.py)
+- 禁用开关存储：[disabled_service_store.py](file:///d:/CODE/PyCODE/Heartbeat_Monitor/core/disabled_service_store.py)
 
 ## 6. SSH 执行与鉴权
 - [ssh_manager.py](file:///d:/CODE/PyCODE/Heartbeat_Monitor/core/ssh_manager.py)

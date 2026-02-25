@@ -16,9 +16,16 @@ python doctor.py
 python -m pip install -r requirements.txt
 python main.py
 ```
-访问：`http://<监控机IP>:5000/`
+访问：`http://<监控机IP>:5000/`（会跳转到登录页 `/login`）
 
-### 2.3 本机快速验证（不配任何远程服务也能跑）
+首次启动会自动初始化默认超管账号：`admin / admin`（登录后请立刻改密码）。
+
+### 2.3 账号、权限与“看不到服务”
+- 未登录：访问页面会跳到 `/login`；访问 `/api/*` 会返回 401
+- 超管（admin）：可看到所有服务，并可在右上角“管理”里创建用户、重置密码、配置“服务绑定”
+- 普通用户：只能看到绑定给自己的服务（如果列表为空，优先检查是否已被超管绑定）
+
+### 2.4 本机快速验证（不配任何远程服务也能跑）
 本项目自带一个本机测试服务：
 ```bash
 python local_test_service.py
@@ -30,6 +37,10 @@ python local_test_service.py
 ```bash
 curl -X POST http://127.0.0.1:18080/toggle
 ```
+
+另外仓库还内置一个“失败重启”的完整本机样例（可在 Win/Linux 直接跑，不依赖本机 SSH）：
+- 示例 API：[local_restart_api.py](file:///d:/CODE/PyCODE/Heartbeat_Monitor/local_restart_api.py)（监听 `127.0.0.1:18081`）
+- 监控配置：[local_restart_demo.yaml](file:///d:/CODE/PyCODE/Heartbeat_Monitor/config/services/local_restart_demo.yaml)（`10s` 检测 + 失败自动重启）
 
 ## 3. 服务类型（分类）与推荐策略
 系统用 `category + on_failure` 来表达“这类服务如何纳管”。
@@ -54,6 +65,14 @@ curl -X POST http://127.0.0.1:18080/toggle
 典型：容易误报、或希望按需检查。
 - `auto_check: false`
 - 在运维界面点“检测”即可手工触发
+
+### 3.4 检测频率（每秒/每分钟/每天固定时间/每周等）
+推荐在 YAML 中配置 `check_schedule`，例如：
+- `10s` / `5m` / `1h`
+- `daily@02:30`（每天 02:30）
+- `weekly@mon 03:00`（每周一 03:00）
+
+也可以在页面右上角“管理”->“服务绑定”里直接修改每个服务的检测频率（仅超管可见，保存后立即生效并持久化）。
 
 ## 4. YAML 配置（新增服务的唯一入口）
 目录：`config/services/`
@@ -117,6 +136,14 @@ restart_cmds:
   - “检测”永远可用，用于手工触发一次检测
 - 点开服务详情：
   - 查看最近一次检测 detail（HTTP 状态码、耗时、响应摘要、自动重启结果等）
+- 页面底部日志区：
+  - “错误日志”：失败原因
+  - “事件日志”：检测成功/失败、手工启停/重启/检测、自动重启等
+
+### 6.1 服务禁用/启用（超管）
+有些服务可能临时不用检测/管控，超管可在服务列表“操作”列直接点击“禁用/启用”：
+- 禁用后：不再参与定时检测；前台按钮（启动/停止/重启/检测）会被禁用；状态显示为 Disabled
+- 启用后：恢复定时检测与前台操作
 
 ## 7. 故障排查
 - 看页面“最近 10 条错误日志”

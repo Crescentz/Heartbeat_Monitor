@@ -27,6 +27,7 @@
 - `service_type`：标注用途（docker/systemd/custom），目前仅用于阅读，不影响逻辑
 - `category`：服务类别（api/web/other），用于界面分类展示
 - `auto_check`：是否参与定时检测（默认 true）
+- `check_schedule`：检测频率（可选；默认 30m）。支持：`10s`、`5m`、`1h`、`daily@02:30`、`weekly@mon 03:00`
 - `on_failure`：失败策略（alert=仅提示；restart=失败后自动重启）
 - `auto_fix`：当 on_failure=restart 时是否执行自动处理（默认 true）
 
@@ -40,6 +41,14 @@
   - string：要求响应文本包含该子串
   - null/空：仅判断 HTTP 2xx
 - `timeout_s`：请求超时秒数
+
+### 本机子进程样例（localproc 插件）
+用于跨平台本机演示“启动/停止/重启/失败重启”而无需 SSH：
+- `plugin: "localproc"`
+- `local_script`：要启动的本机 Python 脚本路径（相对路径从项目根目录算）
+- `local_args`：脚本参数数组（可选）
+
+示例配置见：[local_restart_demo.yaml](file:///d:/CODE/PyCODE/Heartbeat_Monitor/config/services/local_restart_demo.yaml)
 
 ### 文件上传检测（GenericService）
 当需要文件上传检测时填：

@@ -1,0 +1,19 @@
+enabled: false
+id: sample_restart
+name: 失败重启样例（请按需修改）
+description: |
+  示例：检测失败时自动执行重启命令（on_failure=restart）。
+  enabled 默认 false，避免误触发；使用前请补全 SSH 与命令，并改为 enabled: true。
+category: other
+auto_check: true
+on_failure: restart
+auto_fix: true
+host: 127.0.0.1
+ssh_port: 22
+ssh_user: your_user
+ssh_password: your_password
+sudo: true
+test_api: http://127.0.0.1:9999/health
+timeout_s: 10
+expected_response: "ok"
+restart_cmd: "systemctl restart your-service"

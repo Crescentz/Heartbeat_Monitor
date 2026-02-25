@@ -1,0 +1,6 @@
+{
+  "overrides": {
+    "local_restart_demo": "10s",
+    "local_test_01": "120s"
+  }
+}

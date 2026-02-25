@@ -12,7 +12,9 @@
 3. 运行自检：`python doctor.py`
 4. 安装依赖：`python -m pip install -r requirements.txt`
 5. 启动：`python main.py`
-6. 打开：`http://<监控机IP>:5000/`
+6. 打开：`http://<监控机IP>:5000/`（会跳转到 `/login`）
+
+首次启动会自动初始化默认超管账号：`admin / admin`（登录后请立刻改密码）。
 
 ## 2. 快速开始（推荐使用虚拟环境）
 Windows（PowerShell）：
@@ -49,7 +51,9 @@ python local_test_service.py
 ```bash
 python main.py
 ```
-3. 打开页面即可看到“本机测试服务”
+3. 浏览器打开 `http://127.0.0.1:5000/`，用 `admin/admin` 登录后即可看到“本机测试服务”
+
+另外仓库还内置了一个“失败重启”的完整本机样例（无需本机 SSH）：[local_restart_demo.yaml](file:///d:/CODE/PyCODE/Heartbeat_Monitor/config/services/local_restart_demo.yaml) + [local_restart_api.py](file:///d:/CODE/PyCODE/Heartbeat_Monitor/local_restart_api.py)。
 
 ## 3. 目录结构（你只需要关心这几个）
 - `main.py`：启动入口（不需要因新增服务而改动）
@@ -75,6 +79,7 @@ python main.py
 - `test_api` 指向你的健康检查接口（GET 或 POST）
 - `expected_response` 填写成功特征（支持 dict 精确匹配或 string 子串匹配）
 - `category` 区分服务类型：`api/web/other`（影响界面展示与按钮可用性）
+- `check_schedule` 控制检测频率：`10s/5m/1h/daily@02:30/weekly@mon 03:00`（可选；不填默认 30m）
 - `on_failure` 控制失败策略：`alert`（仅提示）或 `restart`（自动重启，需配置 `restart_cmds`）
 
 Mineru 示例： [mineru.yaml](file:///d:/CODE/PyCODE/Heartbeat_Monitor/config/services/mineru.yaml)
@@ -84,7 +89,13 @@ Mineru 示例： [mineru.yaml](file:///d:/CODE/PyCODE/Heartbeat_Monitor/config/s
 - 表格展示：类别、策略、状态、运行时长、故障率、最后检测时间、检测地址
 - 按钮：启动/停止/重启/立即检测
 - 点击服务行：查看服务描述、配置文件路径、最近一次 API 测试详情（响应摘要/耗时等）
-- “最近 10 条错误日志”：按行展示（时间 + 服务 + 原因）
+- “错误日志”：失败原因（时间 + 服务 + 原因）
+- “事件日志”：检测成功/失败、手工启停/重启/检测、自动重启等事件
+- 超管可对服务做“禁用/启用”（禁用后不再定时检测且不允许前台操作）
+
+账号与权限：
+- 未登录访问会跳转到登录页 `/login`
+- 超管可在右上角“管理”里创建用户、重置密码、并把服务绑定给指定用户；普通用户只会看到绑定给自己的服务
 
 ## 7. 新增服务的两种方式
 ### 7.1 只加 YAML（推荐）
@@ -114,3 +125,4 @@ python -m http.server 5173
 - YAML 中包含 SSH/Sudo 密码属于敏感信息，建议：
   - 仅限内网运维主机可读
   - 后续可改为环境变量/独立凭据文件/堡垒机
+- 首次启动默认 `admin/admin` 仅用于初始化，必须尽快修改密码
