@@ -80,7 +80,7 @@ Heartbeat_Monitor/
 ├── data/
 │   ├── logs/                 # 运行日志
 │   ├── service_auto_check.json      # 自动检测开关
-│   ├── service_failure_policy.json  # 失败策略开关（仅检测/自动重启）
+│   ├── service_failure_policy.json  # 失败策略开关（失败告警/自动重启）
 │   └── test.pdf              # 示例上传文件
 ├── docs/
 │   └── project_context.md    # 本文档
@@ -97,7 +97,7 @@ Heartbeat_Monitor/
 - **新增服务（推荐：仅YAML）**：
   - 复制 [services_template.yaml](file:///d:/CODE/PyCODE/Heartbeat_Monitor/config/services_template.yaml) 为 `config/services/<你的服务>.yaml`
   - 或复制 `config/samples/*.yaml` 到 `config/services/` 后再按需修改
-  - 填写 `category / test_api / expected_response`，并用 `on_failure` 选择失败策略（仅检测/自动重启）
+  - 填写 `category / test_api / expected_response`，并用 `on_failure` 选择失败策略（失败告警/自动重启）；是否允许执行启停/重启由“只监控/可运维”总闸控制
   - 新增服务纳管后默认先不参与定时检测；由超管在页面开启“自动检测”后才会加入调度
   - 无需修改 `main.py`
 - **新增服务（插件方式：适用于非标准API）**：

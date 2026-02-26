@@ -23,7 +23,7 @@
 - `category`：服务分类（api/web/other）
 - `auto_check`：是否参与定时检测
 - `check_schedule`：检测频率（可选；支持 `10s/5m/1h/daily@02:30/weekly@mon 03:00`）
-- `on_failure`：失败策略（alert=仅提示；restart=失败后自动重启）
+- `on_failure`：失败策略（alert=失败告警；restart=失败后自动重启）
 
 ## 3. Web 认证与授权
 - Web 使用 session 登录，未登录访问 `/` 会跳转 `/login`，未登录访问 `/api/*` 返回 401（见 [webapp.py](file:///d:/CODE/PyCODE/Heartbeat_Monitor/monitor/webapp.py)）。
@@ -38,9 +38,13 @@
 - `data/logs/monitor.log`：运行日志
 - `data/logs/errors.jsonl`：错误日志（JSON Lines），页面默认展示最近 10 条
 - `data/logs/events.jsonl`：事件日志（检测成功/失败、手工启停、自动重启等）
+- `data/logs/localproc_<service_id>.log`：本机子进程（localproc）stdout/stderr 日志（用于排查端口占用/启动失败等）
 - `data/users.json`：用户数据（密码为 hash）
 - `data/service_bindings.json`：服务与用户绑定关系
 - `data/schedule_overrides.json`：前台设置的检测频率覆盖值
 - `data/service_disabled.json`：服务禁用开关（超管前台设置）
 - `data/service_auto_check.json`：服务级自动检测开关（纳管后默认关闭；开启后才创建定时任务）
-- `data/service_failure_policy.json`：服务级失败策略覆盖（仅检测/自动重启）
+- `data/service_failure_policy.json`：服务级失败策略覆盖（失败告警/自动重启）
+- `data/localproc_pids/`：本机子进程（localproc）PID 记录（用于程序重启后仍可 stop/restart）
+
+提示：`data/` 下均为运行态数据，默认不建议提交到仓库（见项目根目录 `.gitignore`）。

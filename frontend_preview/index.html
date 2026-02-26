@@ -47,8 +47,8 @@
             <label class="form-label mb-1">失败策略</label>
             <select class="form-select form-select-sm" id="filterFailure">
               <option value="all">全部</option>
-              <option value="alert">仅提示</option>
-              <option value="restart">失败重启</option>
+              <option value="alert">失败告警</option>
+              <option value="restart">自动重启</option>
             </select>
           </div>
           <div class="col-12 col-md-2">
@@ -201,7 +201,7 @@
       {
         id: "portal_web_01",
         name: "业务门户（网页）",
-        description: "无API，仅网页可访问性检测；失败仅提示人工处理",
+        description: "无API，仅网页可访问性检测；失败仅提醒人工处理",
         category: "web",
         auto_check: true,
         on_failure: "alert",
@@ -245,7 +245,7 @@
     const serviceIndex = {};
 
     function policyBadge(s) {
-      const policy = !s.auto_check ? "不自动" : (s.on_failure === "restart" ? "失败重启" : "仅提示");
+      const policy = !s.auto_check ? "不自动" : (s.on_failure === "restart" ? "自动重启" : "失败告警");
       const cls = !s.auto_check ? "text-bg-secondary" : (s.on_failure === "restart" ? "text-bg-warning" : "text-bg-info");
       return `<span class="badge ${cls}">${escapeHtml(policy)}</span>`;
     }
@@ -274,7 +274,7 @@
     function buildOpsDocHtml(s) {
       const doc = normalizeOpsDoc(s.ops_doc);
       const onFailure = String(s.on_failure || "alert");
-      const failureHint = onFailure === "restart" ? "失败后自动重启（可在事件日志查看重启结果）" : "失败仅提示人工处理";
+      const failureHint = onFailure === "restart" ? "失败后自动重启（可在事件日志查看重启结果）" : "失败仅提醒人工处理";
       return `
         <div class="mb-3">
           <div class="fw-semibold mb-2">基础信息</div>

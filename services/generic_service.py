@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import time
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import requests
@@ -140,7 +141,8 @@ class GenericService(BaseService):
                 ########## 逻辑开始 ##########
                 local_path = c.split(":", 1)[1].strip()
                 if not os.path.isabs(local_path):
-                    local_path = os.path.join(os.getcwd(), local_path)
+                    root_dir = Path(__file__).resolve().parents[1]
+                    local_path = str((root_dir / local_path).resolve())
                 if not os.path.exists(local_path):
                     return False, f"Script not found: {local_path}"
                 remote_dir = f"/tmp/heartbeat_monitor_scripts/{self.service_id}"

@@ -5,6 +5,7 @@ import logging
 import os
 import time
 import json
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from core.expected_matcher import match_expected
@@ -33,6 +34,7 @@ class MineruService(BaseService):
             private_key_passphrase=str(private_key_passphrase) if private_key_passphrase else None,
         )
         self.container_name = str(config.get("container_name") or "mineru_container")
+        self.sudo = bool(config.get("sudo", True))
         
         self.test_pdf_path = str(config.get("test_file") or os.path.join("data", "test.pdf"))
 
@@ -97,7 +99,7 @@ class MineruService(BaseService):
             return self._run_cmds(cmds)
         
         logging.info("Starting Mineru Service...")
-        out, err = self.ssh.execute_command(f"sudo docker inspect -f '{{{{.State.Running}}}}' {self.container_name}", sudo=True)
+        out, err = self.ssh.execute_command(f"docker inspect -f '{{{{.State.Running}}}}' {self.container_name}", sudo=self.sudo)
         
         container_running = False
         if out and "true" in out.lower():
@@ -106,13 +108,13 @@ class MineruService(BaseService):
             # Container doesn't exist, create it
             api_port = int(self.config.get("api_port") or self.config.get("port") or 8000)
             run_cmd = (
-                f"sudo docker run --gpus all --shm-size 32g "
+                f"docker run --gpus all --shm-size 32g "
                 f"-p 30000:30000 -p 7860:7860 -p {api_port}:8000 "
                 f"--ipc=host -itd --name {self.container_name} "
                 f"-e MINERU_MODEL_SOURCE=local "
                 f"mineru:latest /bin/bash"
             )
-            out, err = self.ssh.execute_command(run_cmd, sudo=True)
+            out, err = self.ssh.execute_command(run_cmd, sudo=self.sudo)
             if err and "Conflict" not in err:
                 return False, f"Docker run failed: {err}"
             container_running = True
@@ -120,14 +122,14 @@ class MineruService(BaseService):
 
         if not container_running:
             # Start existing stopped container
-            out, err = self.ssh.execute_command(f"sudo docker start {self.container_name}", sudo=True)
+            out, err = self.ssh.execute_command(f"docker start {self.container_name}", sudo=self.sudo)
             if err: return False, f"Docker start failed: {err}"
             time.sleep(3)
 
         internal_cmd = str(self.config.get("api_start_cmd") or "nohup mineru-api --host 0.0.0.0 --port 8000 > /vllm-workspace/api.log 2>&1 &")
-        full_exec_cmd = f"sudo docker exec -d {self.container_name} bash -c '{internal_cmd}'"
+        full_exec_cmd = f"docker exec -d {self.container_name} bash -c '{internal_cmd}'"
         
-        out, err = self.ssh.execute_command(full_exec_cmd, sudo=True)
+        out, err = self.ssh.execute_command(full_exec_cmd, sudo=self.sudo)
         if err:
             return False, f"Internal API start failed: {err}"
             
@@ -137,7 +139,7 @@ class MineruService(BaseService):
         cmds = self._get_cmds("stop_cmd", "stop_cmds")
         if cmds:
             return self._run_cmds(cmds)
-        out, err = self.ssh.execute_command(f"sudo docker stop {self.container_name}", sudo=True)
+        out, err = self.ssh.execute_command(f"docker stop {self.container_name}", sudo=self.sudo)
         if err:
             return False, err
         return True, "Container stopped"
@@ -177,25 +179,26 @@ class MineruService(BaseService):
                 ########## 逻辑开始 ##########
                 local_path = c.split(":", 1)[1].strip()
                 if not os.path.isabs(local_path):
-                    local_path = os.path.join(os.getcwd(), local_path)
+                    root_dir = Path(__file__).resolve().parents[1]
+                    local_path = str((root_dir / local_path).resolve())
                 if not os.path.exists(local_path):
                     return False, f"Script not found: {local_path}"
                 remote_dir = f"/tmp/heartbeat_monitor_scripts/{self.service_id}"
                 remote_path = f"{remote_dir}/{os.path.basename(local_path)}"
-                out, err = self.ssh.execute_command(f"mkdir -p {remote_dir}", sudo=True, wrapper=wrapper)
+                out, err = self.ssh.execute_command(f"mkdir -p {remote_dir}", sudo=self.sudo, wrapper=wrapper)
                 if err:
                     return False, err
                 up_ok, up_msg = self.ssh.upload_file(local_path, remote_path)
                 if not up_ok:
                     return False, up_msg
-                out, err = self.ssh.execute_command(f"chmod +x {remote_path}", sudo=True, wrapper=wrapper)
+                out, err = self.ssh.execute_command(f"chmod +x {remote_path}", sudo=self.sudo, wrapper=wrapper)
                 if err:
                     return False, err
-                out, err = self.ssh.execute_command(f"bash {remote_path}", sudo=True, wrapper=wrapper)
+                out, err = self.ssh.execute_command(f"bash {remote_path}", sudo=self.sudo, wrapper=wrapper)
                 if err:
                     return False, err
                 continue
-            out, err = self.ssh.execute_command(cmd, sudo=True, wrapper=wrapper)
+            out, err = self.ssh.execute_command(cmd, sudo=self.sudo, wrapper=wrapper)
             if err:
                 return False, err
         return True, "OK"

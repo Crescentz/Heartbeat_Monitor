@@ -1,5 +1,8 @@
 {
   "local_alert_demo": true,
   "local_restart_demo": true,
-  "mineru_01": true
+  "mineru_01": true,
+  "mineru_prod": true,
+  "office_to_pdf": false,
+  "umi_ocr": true
 }

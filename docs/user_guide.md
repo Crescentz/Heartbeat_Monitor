@@ -25,7 +25,11 @@ python main.py
 - 超管（admin）：可看到所有服务，并可在右上角“管理”里创建用户、重置密码、配置“服务绑定”
 - 普通用户：只能看到绑定给自己的服务（如果列表为空，优先检查是否已被超管绑定）。默认不具备“启停/重启”权限，只能查看与发起检测；需要超管在“管理-用户列表”里开启运维权限后才可操作
 - 服务级“只监控/可运维”：即使是超管，也可以把某个服务切到“只监控”，此时任何人都不能启停/重启且失败不会自动重启，避免误操作；该按钮只会在服务配置了启停/重启能力时出现。系统首次生成开关文件时会把当时已加载的服务默认设为“可运维”，之后新增的服务若未显式设置则默认处于“只监控”，需超管在服务列表操作区手动切换为“可运维”
-- 服务级“自动检测（定时心跳）”：新增服务被纳管后默认先不参与定时检测（避免误报/误操作）；需要超管在服务列表的“频率”列开关或弹窗里开启。系统首次生成自动检测开关文件时会把当时已加载的服务默认设为“开启自动检测”，之后新增的服务若未显式设置则默认关闭
+- 失败策略“失败告警/自动重启”与“只监控”不是一回事：
+  - “只监控”是总闸：关闭后任何人都不能启停/重启，且即使开启了“自动重启”也不会执行（避免误操作）
+  - “失败告警/自动重启”是策略：只影响“定时检测失败后怎么处理”（告警 or 自动重启）；是否允许执行运维仍以“只监控/可运维”为准
+  - 批量切换：超管可用右上角“一键切换”把“支持运维”的服务批量切到“可运维”，或把所有服务批量切到“只监控/可运维”
+- 服务级“自动检测（定时心跳）”：新增服务被纳管后默认先不参与定时检测（避免误报/误操作）；需要超管在服务列表的“频率”列开关或弹窗里开启。系统首次生成自动检测开关文件时会按 YAML 的 `auto_check` 作为初始值（未填则默认关闭），之后新增的服务若未显式设置则默认关闭
 
 ### 2.4 本机快速验证（不配任何远程服务也能跑）
 本项目自带一个本机测试服务：
@@ -37,15 +41,33 @@ python local_test_service.py
 
 提示：超管可直接在服务列表的“频率”列开关自动检测，或点击频率弹窗编辑；也可以在“管理-服务绑定/检测频率”里把某个服务的检测频率设置为 `off`，快速关闭自动检测（无需改 YAML）。
 提示：超管可在“自动检测与频率”弹窗里设置“失败后自动重启”；该开关只影响后续失败的处理方式，且服务必须处于“可运维”才会执行重启。
+提示：服务列表的“策略”列展示的是“只监控/可运维”（运维总闸）以及“是否开启自动检测”。“失败告警/自动重启”属于失败策略，主要体现在详情弹窗与事件日志中。
+提示：服务表格较宽时可用顶部同步横向滚动条；也可在表格区域按住左键拖拽左右滚动（不用拉到页面底部再横向滑动）。
+提示：对“重启后需要一段时间才能就绪”的服务，可在 YAML 配置 `post_control_check_delay_s`（手工启动/重启后复检延迟）与 `post_auto_restart_check_delay_s`（自动重启后复检延迟）。
+
+### 2.5 离线断网环境没有 curl 怎么办
+本项目自身做健康检查不依赖 curl（后端使用 Python requests 发 HTTP 请求）。如果你在服务器上手工验证接口但没有 curl，可以用 Python 一行命令替代：
+```bash
+python -c "import requests; r=requests.get('http://127.0.0.1:54002/api/health',timeout=5); print(r.status_code); print(r.text[:300])"
+```
+文件上传类接口也可以用 requests：
+```bash
+python -c "import requests; f=open('data/test.pdf','rb'); r=requests.post('http://127.0.0.1:58000/file_parse',files={'files':f},timeout=30); print(r.status_code); print(r.text[:300])"
+```
 
 你可以通过切换测试服务状态来验证告警链路：
 ```bash
-curl -X POST http://127.0.0.1:18080/toggle
+python -c "import requests; print(requests.post('http://127.0.0.1:18080/toggle',timeout=3).status_code)"
 ```
 
-另外仓库还内置一个“失败重启”的完整本机样例（可在 Win/Linux 直接跑，不依赖本机 SSH）：
+另外仓库还内置一个“自动重启”的完整本机样例（可在 Win/Linux 直接跑，不依赖本机 SSH）：
 - 示例 API：[local_restart_api.py](file:///d:/CODE/PyCODE/Heartbeat_Monitor/local_restart_api.py)（监听 `127.0.0.1:18081`）
 - 监控配置：[local_restart_demo.yaml](file:///d:/CODE/PyCODE/Heartbeat_Monitor/config/samples/local_restart_demo.yaml)（复制到 `config/services/` 后启用）
+提示：若该样例之前已在本机运行且处于“不健康”（HTTP 503），可直接点“重启”恢复；或在该服务配置里设置 `start_restart_on_running: true`，使“启动”按钮在进程已存在时等价于“重启”。
+提示：访问 `http://127.0.0.1:18081/` 看到 `{"service":"local_restart_api","ok":false}` 仅表示该样例当前被切到“不健康”状态；真正的健康检查接口是 `/health`（不健康时会返回 HTTP 503）。可用下面命令手工恢复为健康：
+```bash
+python -c "import requests; print(requests.post('http://127.0.0.1:18081/toggle',json={'ok':True},timeout=3).text)"
+```
 
 ## 3. 服务类型（分类）与推荐策略
 系统用 `category + on_failure` 来表达“这类服务如何纳管”。
@@ -56,7 +78,7 @@ curl -X POST http://127.0.0.1:18080/toggle
 - 检测：`test_api + expected_response`
 - 运维（可选）：配置 `start/stop/restart_cmd(s)` 其一或多个（需要能 SSH 登录目标机；若做不到就保持为空=仅监控）
 - 失败策略：
-  - 仅提示：`on_failure: alert`
+  - 失败告警：`on_failure: alert`
   - 自动重启：`on_failure: restart`（需要配置 `restart_cmds`）
 
 ### 3.2 网页类（只能看页面状态）
@@ -94,11 +116,11 @@ curl -X POST http://127.0.0.1:18080/toggle
 目录：`config/services/`
 参考样例：`config/samples/`（不自动加载；复制到 `config/services/` 后再启用）
 
-最小可用配置（仅监测 + 仅提示）：
+最小可用配置（仅监测 + 失败告警）：
 ```yaml
 id: "portal_web_01"
 name: "业务门户（网页）"
-description: "无API，失败仅提示人工处理"
+description: "无API，失败仅提醒人工处理"
 category: "web"
 auto_check: true
 on_failure: "alert"

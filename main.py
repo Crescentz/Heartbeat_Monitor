@@ -1,4 +1,5 @@
 import logging
+import os
 import sys
 import threading
 
@@ -65,11 +66,9 @@ if __name__ == '__main__':
         sv = str(overrides.get(str(sid)) or "").strip().lower()
         if sv in ("off", "pause", "paused", "disabled", "disable"):
             initial_auto_check[str(sid)] = False
-        elif str(sid) in overrides and bool(sv):
-            initial_auto_check[str(sid)] = True
         else:
-            initial_auto_check[str(sid)] = bool(cfg.get("auto_check", True))
-    seed_auto_check_enabled(sorted(list(engine.services.keys())), default_enabled=True, initial_map=initial_auto_check)
+            initial_auto_check[str(sid)] = bool(cfg.get("auto_check", False))
+    seed_auto_check_enabled(sorted(list(engine.services.keys())), default_enabled=False, initial_map=initial_auto_check)
     auto_check_enabled_map = get_auto_check_enabled_map()
     failure_policies = get_policies()
     for service_id, svc in engine.services.items():
@@ -98,7 +97,7 @@ if __name__ == '__main__':
                 svc.config["_auto_check_enabled"] = False
                 svc.config["auto_check"] = False
             continue
-        enabled = True if (str(service_id) in overrides and bool(schedule_value)) else bool(auto_check_enabled_map.get(str(service_id), False))
+        enabled = bool(auto_check_enabled_map.get(str(service_id), False))
         if isinstance(getattr(svc, "config", None), dict):
             svc.config["_auto_check_enabled"] = enabled
             svc.config["auto_check"] = enabled
@@ -122,6 +121,9 @@ if __name__ == '__main__':
 
     engine.scheduler = scheduler
     app = create_app(engine, scheduler=scheduler)
-    log.info("Web UI: http://127.0.0.1:60005/")
     threading.Thread(target=engine.check_all, daemon=True).start()
-    app.run(host="0.0.0.0", port=60005, debug=True, use_reloader=False)
+    host = os.environ.get("HBM_HOST") or "0.0.0.0"
+    port = int(os.environ.get("HBM_PORT") or 60005)
+    debug = str(os.environ.get("HBM_DEBUG") or "").strip().lower() in ("1", "true", "yes", "on")
+    log.info("Web UI: http://%s:%s/ (debug=%s)", "127.0.0.1" if host in ("0.0.0.0", "::") else host, port, debug)
+    app.run(host=host, port=port, debug=debug, use_reloader=False)

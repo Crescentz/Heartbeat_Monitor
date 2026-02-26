@@ -1,8 +1,8 @@
 enabled: false
 id: "local_alert_demo"
-name: "本机仅提示样例服务"
+name: "本机失败告警样例服务"
 description: |
-  本机服务样例（18080）。失败策略=仅提示（alert），不自动重启。
+  本机服务样例（18080）。失败策略=失败告警（alert），不自动重启。
   复制到 config/services/ 后按需修改并改为 enabled: true。
 category: "api"
 auto_check: true

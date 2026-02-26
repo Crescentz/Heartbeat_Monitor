@@ -28,7 +28,7 @@ def match_expected(response: requests.Response, expected: Any) -> Tuple[bool, st
         if expected_type in ("text", "html"):
             return _match_text(response, expected)
         return _match_json(response, expected)
-    return True, ""
+    return False, f"Bad expected_response type: {type(expected).__name__}"
 
 
 def _match_text(response: requests.Response, expected: Dict[str, Any]) -> Tuple[bool, str]:
@@ -187,4 +187,3 @@ def _split_path(path: str) -> List[Any]:
     if buf:
         parts.append(buf)
     return parts
-

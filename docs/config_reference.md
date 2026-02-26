@@ -28,20 +28,68 @@
 - `sudo`：是否使用 sudo 执行命令（仅命令执行时生效；默认 true/false 以模板为准）
 - `service_type`：标注用途（docker/systemd/custom），目前仅用于阅读，不影响逻辑
 - `category`：服务类别（api/web/other），用于界面分类展示
-- `auto_check`：是否参与定时检测（默认 true）
-- `check_schedule`：检测频率（可选；默认 30m）。支持：`10s`、`5m`、`1h`、`daily@02:30`、`weekly@mon 03:00`；管理界面也支持填 `off` 快速关闭自动检测（并会自动保存）
-- `on_failure`：失败策略（alert=仅提示；restart=失败后自动重启）
+- `auto_check`：YAML 默认值（兼容旧配置）。实际是否参与定时检测以页面“自动检测”开关为准（持久化在 `data/service_auto_check.json`）；新纳管服务默认先不参与定时检测
+- `check_schedule`：检测频率（可选；默认 30m）。支持：`10s`、`5m`、`1h`、`daily@02:30`、`weekly@mon 03:00`；管理界面也支持填 `off` 关闭自动检测（并会自动保存）
+- `on_failure`：失败策略（alert=失败告警；restart=失败后自动重启）
 - `auto_fix`：当 on_failure=restart 时是否执行自动处理（默认 true）
+- `post_control_check_delay_s`：手工启动/重启后，延迟多少秒再做一次复检（用于“服务启动需要缓冲时间”的场景；上限 120s）
+- `post_auto_restart_check_delay_s`：自动重启后，延迟多少秒再做一次复检（用于“服务重启后需要缓冲时间”的场景；上限 120s；默认 5s）
 - `ops_doc`：服务运维文档（可选）。前端点击“运维文档”会按固定模板展示（见 services_template.yaml）
 - 服务级“只监控/可运维”开关：该开关由前端超管操作持久化（不在 YAML 里写），存储在 `data/service_ops_mode.json`。切到“只监控”后任何人都不能启停/重启，且失败不会自动重启；该文件首次生成时会把当时已加载的服务默认设为“可运维”，之后新增的服务若未显式设置则默认按“只监控”处理，需超管手动切换为“可运维”
+
+### 1.1 SSH 私钥怎么配置（推荐）
+建议使用 `ssh_private_key_path` 引用私钥文件路径，不要把私钥内容写进 YAML（避免泄露）。
+
+**关键点：这里写的是“私钥文件”（private key），不是公钥（.pub）**
+- 私钥文件常见名字：`id_ed25519` / `id_rsa` / `heartbeat_monitor`（扩展名可有可无）
+- 公钥文件常见名字：`id_ed25519.pub` / `id_rsa.pub`（这个不能填到 `ssh_private_key_path`）
+
+**私钥文件里面长什么样（示例）**
+- OpenSSH 新格式（常见）会以这一行开头：
+  - `-----BEGIN OPENSSH PRIVATE KEY-----`
+- 老的 PEM/RSA 格式会以这一行开头：
+  - `-----BEGIN RSA PRIVATE KEY-----`
+- 它们都属于“私钥内容”，必须保密，权限建议仅管理员可读。
+
+**公钥文件（.pub）里面长什么样（示例）**
+- 一般是一行文本（不要保密），形如：
+  - `ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI... heartbeat_monitor`
+- 公钥需要追加到目标机的 `~/.ssh/authorized_keys` 里，才能用私钥免密登录。
+
+步骤 1：在“监控机”准备私钥文件
+- Linux：建议放在 `/root/.ssh/heartbeat_monitor` 或 `/home/<user>/.ssh/heartbeat_monitor`
+- Windows：建议放在 `C:\\keys\\heartbeat_monitor`（或任意仅管理员可读目录）
+
+步骤 2：把公钥加到被监控服务器的 authorized_keys
+- 生成密钥（示例为 ed25519）：
+  - `ssh-keygen -t ed25519 -f heartbeat_monitor -C heartbeat_monitor`
+- 把 `heartbeat_monitor.pub` 追加到目标机 `~/.ssh/authorized_keys`
+
+步骤 3：权限与路径写法
+- Linux 权限建议：`chmod 600 /root/.ssh/heartbeat_monitor`
+- YAML 中写法（推荐绝对路径）：
+  - `ssh_private_key_path: "/root/.ssh/heartbeat_monitor"`
+  - `ssh_private_key_passphrase: "xxx"`（若私钥有口令）
+- 若写相对路径：会按项目根目录解析（例如 `keys/heartbeat_monitor`）
+
+**补充：哪些命令需要 sudo**
+- 默认 `sudo: true`：会在远端命令前加 `sudo -S`（并在需要时写入口令），适用于“运维账号不是 root，但需要提权”的场景。
+- 如果你的远端账号本身就是 root，或 docker/systemctl 不需要 sudo：把 `sudo: false` 写到该服务里即可（此时不会加 sudo，也不会申请 pty）。
 
 ### 0.1 建议的“最简单心智模型”
 建议只记 4 个开关/入口（其余字段按需用）：
 - `enabled`（YAML）：是否加载到页面（=是否存在这个服务）
 - “禁用/启用”（页面按钮）：临时禁用服务（禁用后不检测、不可操作）
 - “只监控/可运维”（页面按钮）：是否允许启停/重启（防误操作总开关；仅当服务配置了启停/重启能力时才会出现）
-- “自动检测”（管理面板里检测频率）：正常填 `10s/30m/...`；填 `off` 表示关闭自动检测（不改 YAML 也能生效）
+- “自动检测”（服务列表/弹窗/管理面板）：开启后才会加入定时任务；填 `off` 表示关闭自动检测（不改 YAML 也能生效）
   - 超管也可在服务列表的“频率”列直接开关/编辑
+
+### 0.2 开关/策略是否重复？（不重复，但容易混淆）
+常见容易混淆的是“只监控/可运维”和“失败告警/自动重启”：
+- “只监控/可运维”是运维总闸（`data/service_ops_mode.json`）：关闭后任何人都不能启停/重启，且定时检测失败也不会执行自动重启。
+- “失败告警/自动重启”是失败策略（`on_failure` / `data/service_failure_policy.json`）：只决定“定时检测失败后怎么处理”；是否能执行重启仍取决于服务是否处于“可运维”且配置了重启能力（restart_cmds）。
+- “禁用/启用”最高优先级（`data/service_disabled.json`）：禁用后既不参与检测，也不可操作。
+- “自动检测”仅控制是否加入定时任务（`data/service_auto_check.json`）：关闭后仍可手工点“检测”，但手工检测不会触发自动重启。
 
 ## 2. 检测字段（GenericService）
 - `plugin`：留空则使用通用检测；填写插件名则加载 `services/<plugin>_service.py`
@@ -99,7 +147,7 @@ expected_response:
 Mineru 示例接口：`POST /file_parse`，multipart 上传 `files` 字段（数组），并可附带参数（lang_list/backend/parse_method 等），详见示例配置 [mineru.yaml](file:///d:/CODE/PyCODE/Heartbeat_Monitor/config/samples/mineru.yaml)（复制到 `config/services/` 后再启用）。
 
 ### 本机子进程样例（localproc 插件）
-用于跨平台本机演示“启动/停止/重启/失败重启”而无需 SSH。本机服务不一定是本项目内的 Python 脚本，也可以是 docker/java/systemctl 等本机命令：
+用于跨平台本机演示“启动/停止/重启/自动重启”而无需 SSH。本机服务不一定是本项目内的 Python 脚本，也可以是 docker/java/systemctl 等本机命令：
 - `plugin: "localproc"`
 - 可选 `local_cwd`：本机命令/脚本的工作目录（可写绝对路径或相对项目根目录）
 - **方式 A（推荐，适配最广）**：写本机命令 `start/stop/restart_cmd(s)`（在监控机本机执行）
@@ -107,6 +155,7 @@ Mineru 示例接口：`POST /file_parse`，multipart 上传 `files` 字段（数
 - `local_args`：脚本参数数组（可选）
 - 不需要填写 `ssh_user/ssh_password/sudo_password`
 - 若某些“清理命令”允许失败（例如 docker rm -f 不存在的容器），可用 `@ignore:` 前缀忽略该条命令的非 0 返回码
+- 可选 `start_restart_on_running: true`：当本机子进程已存在时，“启动”按钮改为执行一次 restart（用于演示环境中快速把服务从不健康状态拉回健康；生产环境不建议开启）
 
 示例配置见：
 - [local_test_managed.yaml](file:///d:/CODE/PyCODE/Heartbeat_Monitor/config/samples/local_test_managed.yaml)
@@ -132,7 +181,7 @@ Mineru 示例接口：`POST /file_parse`，multipart 上传 `files` 字段（数
 有些服务只能访问页面 URL 或 HTTP API（curl/python 能通），但无法 SSH 登录目标机做启停运维。此时建议：
 - 不配置任何 `start/stop/restart_cmd(s)`（前端会自动禁用“启动/停止/重启”按钮）
 - 只配置检测字段：`test_api / expected_response / timeout_s / check_schedule`
-- `on_failure` 推荐用 `alert`（仅提示人工处理）
+- `on_failure` 推荐用 `alert`（仅提醒人工处理）
 
 参考样例：
 - 网页类仅监控：[web_only_sample.yaml](file:///d:/CODE/PyCODE/Heartbeat_Monitor/config/samples/web_only_sample.yaml)

@@ -1,6 +1,6 @@
 enabled: false
 id: "sample_restart"
-name: "失败重启样例（远端 SSH 执行）"
+name: "自动重启样例（远端 SSH 执行）"
 description: |
   示例：检测失败时自动执行重启命令（on_failure=restart）。
   复制到 config/services/ 后按需修改并改为 enabled: true。
@@ -30,4 +30,3 @@ ops_doc:
   contacts: []
   api_doc: ""
   notes: ""
-

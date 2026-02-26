@@ -1,0 +1,149 @@
+services:
+  - enabled: true
+    id: "mineru_prod"
+    name: "Mineru OCR（可运维）"
+    description: "文件上传解析类服务：POST /file_parse 上传 PDF；失败可远端重启容器"
+    category: "api"
+    auto_check: false
+    check_schedule: "5m"
+    on_failure: "alert"
+    auto_fix: true
+    plugin: "mineru"
+
+    host: "111.111.111.X"
+    ssh_port: 22
+    ssh_user: "root"
+    ssh_private_key_path: "/root/.ssh/heartbeat_monitor"
+    sudo: true
+
+    test_api: "http://111.111.111.X:58000/file_parse"
+    test_file: "data/test.pdf"
+    file_field: "files"
+    file_field_as_list: true
+    file_extra_form:
+      lang_list: ["zh"]
+      backend: "vlm-vllm-async-engine"
+      parse_method: "ocr"
+      return_md: "true"
+      return_content_list: "true"
+    expected_response:
+      __type: "json"
+      __rules:
+        - { path: "backend", op: "exists" }
+        - { path: "version", op: "exists" }
+        - { path: "results", op: "exists" }
+    timeout_s: 300
+    max_elapsed_ms: null
+
+    container_name: "mineru"
+    start_cmds:
+      - "@script:ops_scripts/mineru_prod/start.sh"
+    stop_cmds:
+      - "@script:ops_scripts/mineru_prod/stop.sh"
+    restart_cmds:
+      - "@script:ops_scripts/mineru_prod/restart.sh"
+
+  - enabled: true
+    id: "xinference_xinf"
+    name: "XInference（可运维）"
+    description: "Docker 容器 xinference-local；健康检查 /v1/models 返回 object=list 即视为正常"
+    category: "web"
+    auto_check: false
+    check_schedule: "1m"
+    on_failure: "alert"
+    auto_fix: true
+    plugin: ""
+
+    host: "111.111.111.X"
+    ssh_port: 22
+    ssh_user: "root"
+    ssh_private_key_path: "/root/.ssh/heartbeat_monitor"
+    sudo: true
+
+    test_api: "http://111.111.111.X:9997/v1/models"
+    expected_response:
+      object: "list"
+    timeout_s: 30
+    max_elapsed_ms: null
+
+    start_cmds:
+      - "@script:ops_scripts/xinference_xinf/start.sh"
+    stop_cmds:
+      - "@script:ops_scripts/xinference_xinf/stop.sh"
+    restart_cmds:
+      - "@script:ops_scripts/xinference_xinf/restart.sh"
+    post_control_check_delay_s: 5
+    post_auto_restart_check_delay_s: 10
+
+  - enabled: false
+    id: "llm_chat_only"
+    name: "大模型 Chat（仅监控）"
+    description: "POST /v1/chat/completions 验证推理链路（需填写 MODEL_UID；注意会消耗算力，建议频率拉长）"
+    category: "api"
+    auto_check: false
+    check_schedule: "30m"
+    on_failure: "alert"
+    plugin: ""
+
+    host: "111.111.111.X"
+    test_api: "http://111.111.111.X:9997/v1/chat/completions"
+    test_method: "POST"
+    test_payload:
+      model: "<MODEL_UID>"
+      messages:
+        - { role: "user", content: "What is the largest animal?" }
+    expected_response:
+      __type: "json"
+      __rules:
+        - { path: "choices", op: "len_gt", value: 0 }
+        - { path: "choices[0].message.content", op: "len_gt", value: 1 }
+    timeout_s: 300
+    max_elapsed_ms: null
+
+  - enabled: true
+    id: "office_to_pdf"
+    name: "Office 转 PDF（仅监控）"
+    description: "健康检查 /api/health；转换接口可用但不建议高频做文件上传检测"
+    category: "api"
+    auto_check: false
+    check_schedule: "1m"
+    on_failure: "alert"
+    plugin: ""
+
+    host: "111.111.111.X"
+    test_api: "http://111.111.111.X:54002/api/health"
+    expected_response:
+      status: "healthy"
+    timeout_s: 30
+    max_elapsed_ms: null
+
+  - enabled: true
+    id: "umi_ocr"
+    name: "Umi-OCR（可运维）"
+    description: "首页返回包含 Umi-OCR 版本号；可通过 docker 容器启停"
+    category: "api"
+    auto_check: false
+    check_schedule: "1m"
+    on_failure: "alert"
+    auto_fix: true
+    plugin: ""
+
+    host: "111.111.111.X"
+    ssh_port: 22
+    ssh_user: "root"
+    ssh_private_key_path: "/root/.ssh/heartbeat_monitor"
+    sudo: true
+
+    test_api: "http://111.111.111.X:54003/"
+    expected_response: "Umi-OCR"
+    timeout_s: 30
+    max_elapsed_ms: null
+
+    start_cmds:
+      - "@script:ops_scripts/umi_ocr/start.sh"
+    stop_cmds:
+      - "@script:ops_scripts/umi_ocr/stop.sh"
+    restart_cmds:
+      - "@script:ops_scripts/umi_ocr/restart.sh"
+    post_control_check_delay_s: 3
+    post_auto_restart_check_delay_s: 5

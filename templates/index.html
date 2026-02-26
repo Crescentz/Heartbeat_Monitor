@@ -8,14 +8,16 @@
   <style>
     :root { --hb-border: rgba(0,0,0,.08); }
     body { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
-    .status-pill { display: inline-block; padding: 2px 10px; border-radius: 999px; font-weight: 700; letter-spacing: .2px; }
-    .status-running { color: #0f5132; background: rgba(25,135,84,.16); border: 1px solid rgba(25,135,84,.28); }
-    .status-error { color: #842029; background: rgba(220,53,69,.16); border: 1px solid rgba(220,53,69,.28); }
-    .status-disabled { color: #41464b; background: rgba(108,117,125,.14); border: 1px solid rgba(108,117,125,.28); }
-    .status-unknown { color: #055160; background: rgba(13,202,240,.14); border: 1px solid rgba(13,202,240,.28); }
+    .status-pill { display: inline-block; padding: 4px 12px; border-radius: 999px; font-weight: 800; letter-spacing: .2px; font-size: 13px; }
+    .status-running { color: #0f5132; background: rgba(25,135,84,.22); border: 1px solid rgba(25,135,84,.42); }
+    .status-error { color: #842029; background: rgba(220,53,69,.22); border: 1px solid rgba(220,53,69,.42); }
+    .status-disabled { color: #41464b; background: rgba(108,117,125,.18); border: 1px solid rgba(108,117,125,.38); }
+    .status-unknown { color: #055160; background: rgba(13,202,240,.18); border: 1px solid rgba(13,202,240,.38); }
     .log-box { max-height: 280px; overflow-y: auto; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; font-size: 12px; }
     .service-row { cursor: pointer; }
     .table-responsive { overflow-x: auto; overflow-y: hidden; width: 100%; -webkit-overflow-scrolling: touch; scrollbar-gutter: stable; }
+    #servicesHScrollTop { overflow-x: auto; overflow-y: hidden; width: 100%; height: 14px; scrollbar-gutter: stable; background: rgba(248,249,250,0.6); }
+    #servicesHScrollTopInner { height: 1px; }
     #servicesTable { min-width: 1830px; width: max-content; table-layout: fixed; }
     #servicesTable thead th { position: sticky; top: 0; z-index: 2; background: rgba(248,249,250,0.98); }
     .col-resizer { position: absolute; top: 0; right: 0; width: 8px; height: 100%; cursor: col-resize; user-select: none; }
@@ -27,6 +29,8 @@
     .table td { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     td.td-actions { overflow: visible; white-space: normal; }
     td.td-schedule { overflow: visible; white-space: normal; }
+    .hb-inline-icon { display: inline-flex; align-items: center; vertical-align: -2px; }
+    .hb-inline-icon svg { width: 14px; height: 14px; }
     .topbar { position: sticky; top: 0; z-index: 30; padding-top: 1rem; background: rgba(248,249,250,.72); backdrop-filter: blur(10px); }
     .topbar-inner { background: rgba(255,255,255,.92); }
   </style>
@@ -43,6 +47,14 @@
         <div class="text-muted small align-self-center">用户：{{ user.username }}{% if user.role == "admin" %}（超管）{% else %}{% if user.can_control %}（可运维）{% else %}（只监控）{% endif %}{% endif %}</div>
         <button class="btn btn-outline-secondary btn-sm" id="changeMyPwd">改密码</button>
         {% if user.role == "admin" %}
+        <div class="btn-group">
+          <button class="btn btn-outline-secondary btn-sm dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">一键切换</button>
+          <ul class="dropdown-menu dropdown-menu-end">
+            <li><a class="dropdown-item" href="javascript:void(0)" id="bulkEnableCapable">支持运维→可运维</a></li>
+            <li><a class="dropdown-item" href="javascript:void(0)" id="bulkDisableAll">全部→只监控</a></li>
+            <li><a class="dropdown-item" href="javascript:void(0)" id="bulkEnableAll">全部→可运维</a></li>
+          </ul>
+        </div>
         <button class="btn btn-outline-primary btn-sm" id="openAdmin">管理</button>
         {% endif %}
         <button class="btn btn-outline-secondary btn-sm" type="button" data-bs-toggle="modal" data-bs-target="#appInfoModal">项目信息</button>
@@ -72,14 +84,14 @@
               <option value="all">全部</option>
               <option value="api">API</option>
               <option value="web">网页</option>
-              <option value="other">Other</option>
+              <option value="other">其他</option>
             </select>
           </div>
           <div class="col-12 col-md-3">
             <label class="form-label mb-1">失败策略</label>
             <select class="form-select form-select-sm" id="filterFailure">
               <option value="all">全部</option>
-              <option value="alert">仅检测</option>
+              <option value="alert">失败告警</option>
               <option value="restart">自动重启</option>
             </select>
           </div>
@@ -87,10 +99,10 @@
             <label class="form-label mb-1">状态</label>
             <select class="form-select form-select-sm" id="filterStatus">
               <option value="all">全部</option>
-              <option value="running">Running</option>
-              <option value="error">Error</option>
-              <option value="disabled">Disabled</option>
-              <option value="unknown">Unknown</option>
+              <option value="running">运行</option>
+              <option value="error">异常</option>
+              <option value="disabled">禁用</option>
+              <option value="unknown">未知</option>
             </select>
           </div>
           <div class="col-12 col-md-1">
@@ -106,6 +118,7 @@
     <div class="card shadow-sm mb-3">
       <div class="card-header">服务状态</div>
       <div class="card-body p-0">
+        <div id="servicesHScrollTop" style="display:none;"><div id="servicesHScrollTopInner"></div></div>
         <div class="table-responsive" id="servicesTableWrap">
           <table class="table table-hover mb-0 align-middle" id="servicesTable">
             <thead class="table-light">
@@ -245,6 +258,27 @@
       return "status-unknown";
     }
 
+    function statusLabel(s) {
+      if (s === "Running") return "运行";
+      if (s === "Error") return "异常";
+      if (s === "Disabled") return "禁用";
+      return "未知";
+    }
+
+    function iconAutoRestart() {
+      return `<span class="hb-inline-icon text-warning ms-2" title="失败自动重启">
+        <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+          <path d="M8 3a5 5 0 0 1 4.7 3.3.5.5 0 1 1-.94.34A4 4 0 1 0 12 10H10.5a.5.5 0 0 1-.35-.85l2-2a.5.5 0 0 1 .7 0l2 2a.5.5 0 0 1-.35.85H13a5 5 0 1 1-5-7z"/>
+        </svg>
+      </span>`;
+    }
+
+    function failurePolicyLabel(v) {
+      const s = String(v || "").toLowerCase();
+      if (s === "restart") return "失败自动重启";
+      return "失败告警";
+    }
+
     function safeId(s) {
       return String(s).replaceAll(/[^a-zA-Z0-9_-]/g, "_");
     }
@@ -285,6 +319,7 @@
               widths[String(i)] = Math.round(x.getBoundingClientRect().width);
             });
             try { localStorage.setItem(storageKey, JSON.stringify(widths)); } catch {}
+            updateServicesHScroll();
             window.removeEventListener("mousemove", onMove);
             window.removeEventListener("mouseup", onUp);
           };
@@ -306,14 +341,56 @@
     };
     const serviceIndex = {};
 
+    function updateServicesHScroll() {
+      const wrap = document.getElementById("servicesTableWrap");
+      const table = document.getElementById("servicesTable");
+      const top = document.getElementById("servicesHScrollTop");
+      const inner = document.getElementById("servicesHScrollTopInner");
+      if (!wrap || !table || !top || !inner) return;
+      const w = Math.max(table.scrollWidth || 0, 0);
+      inner.style.width = `${w}px`;
+      const need = w > (wrap.clientWidth || 0) + 2;
+      top.style.display = need ? "block" : "none";
+      if (need) top.scrollLeft = wrap.scrollLeft;
+    }
+
+    function initServicesHScrollSync() {
+      const wrap = document.getElementById("servicesTableWrap");
+      const top = document.getElementById("servicesHScrollTop");
+      const table = document.getElementById("servicesTable");
+      if (!wrap || !top || !table) return;
+      if (wrap.dataset.hscrollSync === "1") return;
+      wrap.dataset.hscrollSync = "1";
+      let syncing = false;
+      wrap.addEventListener("scroll", () => {
+        if (syncing) return;
+        syncing = true;
+        top.scrollLeft = wrap.scrollLeft;
+        syncing = false;
+      });
+      top.addEventListener("scroll", () => {
+        if (syncing) return;
+        syncing = true;
+        wrap.scrollLeft = top.scrollLeft;
+        syncing = false;
+      });
+      window.addEventListener("resize", () => {
+        updateServicesHScroll();
+      });
+      updateServicesHScroll();
+    }
+
     function policyBadge(s) {
       const parts = [];
-      const autoRestart = !!s.auto_restart;
-      parts.push(
-        autoRestart
-          ? `<span class="badge bg-light border border-warning text-warning">自动重启</span>`
-          : `<span class="badge bg-light border text-secondary">仅检测</span>`
-      );
+      const opsCapable = !!s.ops_capable;
+      const opsEnabled = !!s.ops_enabled;
+      if (opsCapable) {
+        parts.push(`<span class="badge bg-light border text-secondary">支持运维</span>`);
+        parts.push(opsEnabled ? `<span class="badge text-bg-success">可运维</span>` : `<span class="badge text-bg-dark">只监控</span>`);
+        if (opsEnabled && !!s.auto_restart) parts.push(iconAutoRestart());
+      } else {
+        parts.push(`<span class="badge text-bg-secondary">只监控</span>`);
+      }
       if (!s.auto_check) {
         parts.push(`<span class="badge text-bg-secondary">未开启自动检测</span>`);
       }
@@ -345,7 +422,7 @@
       const doc = normalizeOpsDoc(s.ops_doc);
       const onFailure = String(s.on_failure || "alert");
       const autoRestart = !!s.auto_restart;
-      const failureHint = autoRestart ? "失败后自动重启（可在事件日志查看重启结果）" : "失败仅提示人工处理";
+      const failureHint = autoRestart ? "失败后自动重启（可在事件日志查看重启结果）" : "失败仅提醒人工处理";
       return `
         <div class="mb-3">
           <div class="fw-semibold mb-2">基础信息</div>
@@ -363,7 +440,7 @@
             <div class="col-12 col-md-6"><span class="text-muted">检测地址：</span><code>${escapeHtml(s.test_api || "")}</code></div>
             <div class="col-12 col-md-6"><span class="text-muted">检测频率：</span><code>${escapeHtml(s.check_schedule || "") || "30m(默认)"}</code></div>
             <div class="col-12 col-md-6"><span class="text-muted">自动检测：</span>${escapeHtml(String(!!s.auto_check))}</div>
-            <div class="col-12 col-md-6"><span class="text-muted">失败策略：</span>${escapeHtml(onFailure)}</div>
+            <div class="col-12 col-md-6"><span class="text-muted">失败策略：</span>${escapeHtml(failurePolicyLabel(onFailure))}</div>
           </div>
           <div class="text-muted mt-2">${escapeHtml(doc.monitor || failureHint)}</div>
         </div>
@@ -458,11 +535,9 @@
         const disabled = !!s.disabled;
         const opsEnabled = !!s.ops_enabled;
         const opsCapable = !!s.ops_capable;
-        const opsLabel = opsEnabled ? "可运维" : "只监控";
         const statusText = disabled ? "Disabled" : (s.status || "");
         const statusCls = statusClass(statusText);
-        const disabledBadge = disabled ? `<span class="badge text-bg-secondary ms-2">已禁用</span>` : "";
-        const opsBadge = (!disabled && opsCapable && !opsEnabled) ? `<span class="badge text-bg-dark ms-2">只监控</span>` : "";
+        const statusTextCn = statusLabel(statusText);
         const autoCheck = !!s.auto_check;
         const scheduleText = autoCheck ? (sched || "30m(默认)") : "off";
         return `
@@ -491,7 +566,7 @@
                   : `<code>${scheduleText}</code>`
               }
             </td>
-            <td><span class="status-pill ${statusCls}">${escapeHtml(statusText)}${disabledBadge}${opsBadge}</span></td>
+            <td><span class="status-pill ${statusCls}">${escapeHtml(statusTextCn)}</span></td>
             <td class="text-truncate" style="max-width: 360px;">${testApi}</td>
             <td>${escapeHtml(s.uptime || "")}</td>
             <td>${escapeHtml(s.failure_rate || "")}</td>
@@ -509,7 +584,7 @@
                         <button class="btn btn-outline-secondary btn-sm dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">管理</button>
                         <ul class="dropdown-menu">
                           <li><a class="dropdown-item" href="javascript:void(0)" onclick='event.stopPropagation(); openScheduleModal(${sidJson})'>自动检测/频率</a></li>
-                          ${opsCapable ? `<li><a class="dropdown-item" href="javascript:void(0)" onclick='event.stopPropagation(); toggleOpsMode(${sidJson}, ${opsEnabled ? "false" : "true"})'>切换：${opsLabel}</a></li>` : ""}
+                          ${opsCapable ? `<li><a class="dropdown-item" href="javascript:void(0)" onclick='event.stopPropagation(); toggleOpsMode(${sidJson}, ${opsEnabled ? "false" : "true"})'>切换：${opsEnabled ? "只监控" : "可运维"}</a></li>` : ""}
                           <li><a class="dropdown-item" href="javascript:void(0)" onclick='event.stopPropagation(); toggleDisabled(${sidJson}, ${disabled ? "false" : "true"})'>${disabled ? "启用" : "禁用"}</a></li>
                         </ul>
                       </div>
@@ -521,6 +596,8 @@
           </tr>
         `;
       }).join("");
+      initServicesHScrollSync();
+      updateServicesHScroll();
 
       const anyModalOpen = !!document.querySelector(".modal.show");
       if (anyModalOpen) return;
@@ -698,6 +775,22 @@
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ service_id: sid, ops_enabled: !!opsEnabled })
+      });
+      await loadAll();
+    }
+
+    async function bulkSetOpsMode(mode) {
+      const m = String(mode || "");
+      const tips = {
+        enable_capable: "将所有“支持运维”的服务切换为可运维，其余保持只监控。确认继续？",
+        disable_all: "将所有服务切换为只监控（会关闭自动重启执行）。确认继续？",
+        enable_all: "将所有服务切换为可运维。确认继续？"
+      };
+      if (!confirm(tips[m] || "确认继续？")) return;
+      await fetchJson("/api/admin/ops_mode/bulk", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: m })
       });
       await loadAll();
     }
@@ -1007,6 +1100,7 @@
     }
 
     initResizableColumns("servicesTable", "hbmon_servicesTable_colwidths");
+    initServicesHScrollSync();
     bindFilters();
     loadAll();
 
@@ -1554,6 +1648,12 @@
           modal.show();
         };
       }
+      const bulkEnableCapable = document.getElementById("bulkEnableCapable");
+      const bulkDisableAll = document.getElementById("bulkDisableAll");
+      const bulkEnableAll = document.getElementById("bulkEnableAll");
+      if (bulkEnableCapable) bulkEnableCapable.onclick = async () => { await bulkSetOpsMode("enable_capable"); };
+      if (bulkDisableAll) bulkDisableAll.onclick = async () => { await bulkSetOpsMode("disable_all"); };
+      if (bulkEnableAll) bulkEnableAll.onclick = async () => { await bulkSetOpsMode("enable_all"); };
     }
 
     const changePwdBtn = document.getElementById("changeMyPwd");

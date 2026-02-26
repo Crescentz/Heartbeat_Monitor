@@ -40,11 +40,9 @@ def create_app(engine: MonitorEngine, scheduler=None) -> Flask:
         sv = str(overrides.get(str(sid)) or "").strip().lower()
         if sv in ("off", "pause", "paused", "disabled", "disable"):
             initial_auto_check[str(sid)] = False
-        elif str(sid) in overrides and bool(sv):
-            initial_auto_check[str(sid)] = True
         else:
-            initial_auto_check[str(sid)] = bool(cfg.get("auto_check", True))
-    seed_auto_check_enabled(sorted(list(engine.services.keys())), default_enabled=True, initial_map=initial_auto_check)
+            initial_auto_check[str(sid)] = bool(cfg.get("auto_check", False))
+    seed_auto_check_enabled(sorted(list(engine.services.keys())), default_enabled=False, initial_map=initial_auto_check)
     auto_check_enabled_map = get_auto_check_enabled_map()
     failure_policies = get_policies()
     for sid, svc in engine.services.items():
@@ -64,9 +62,6 @@ def create_app(engine: MonitorEngine, scheduler=None) -> Flask:
             if sv.lower() in ("off", "pause", "paused", "disabled", "disable"):
                 svc.config["_auto_check_enabled"] = False
                 svc.config["auto_check"] = False
-            elif str(sid) in overrides and sv:
-                svc.config["_auto_check_enabled"] = True
-                svc.config["auto_check"] = True
             else:
                 enabled = bool(auto_check_enabled_map.get(str(sid), False))
                 svc.config["_auto_check_enabled"] = enabled
@@ -214,6 +209,33 @@ def create_app(engine: MonitorEngine, scheduler=None) -> Flask:
             svc.config["_ops_enabled"] = enabled
         return jsonify({"success": True, "message": "ok"})
 
+    @app.post("/api/admin/ops_mode/bulk")
+    def api_admin_set_ops_mode_bulk():
+        if not _is_admin():
+            return jsonify({"error": "forbidden"}), 403
+        payload = request.get_json(silent=True) or {}
+        mode = str(payload.get("mode") or "").strip().lower()
+        if mode not in ("enable_all", "disable_all", "enable_capable"):
+            return jsonify({"success": False, "message": "invalid_mode"}), 400
+
+        changed = 0
+        for sid, svc in engine.services.items():
+            info = {}
+            try:
+                info = svc.get_info() or {}
+            except Exception:
+                info = {}
+            ops_capable = bool(info.get("ops_capable"))
+            if mode == "enable_capable" and not ops_capable:
+                enabled = False
+            else:
+                enabled = (mode != "disable_all")
+            set_ops_enabled(sid, enabled)
+            if isinstance(getattr(svc, "config", None), dict):
+                svc.config["_ops_enabled"] = enabled
+            changed += 1
+        return jsonify({"success": True, "message": "ok", "changed": changed})
+
     @app.get("/api/admin/bindings")
     def api_admin_bindings():
         if not _is_admin():
@@ -250,8 +272,6 @@ def create_app(engine: MonitorEngine, scheduler=None) -> Flask:
             sv = str(overrides.get(str(sid)) or "").strip()
             if sv.lower() in ("off", "pause", "paused", "disabled", "disable"):
                 enabled[str(sid)] = False
-            elif str(sid) in overrides and sv:
-                enabled[str(sid)] = True
             else:
                 enabled[str(sid)] = bool(auto_map.get(str(sid), False))
         return jsonify({"overrides": overrides, "base": base, "enabled": enabled})
@@ -301,26 +321,33 @@ def create_app(engine: MonitorEngine, scheduler=None) -> Flask:
                 svc.config["_auto_check_enabled"] = True
                 svc.config["auto_check"] = True
 
-        if scheduler is not None and bool(getattr(svc, "config", {}).get("auto_check", True)):
+        if scheduler is not None:
             job_id = job_id_for_service(sid)
             try:
                 scheduler.remove_job(job_id)
             except Exception:
                 pass
-            spec = parse_check_schedule(
-                get_overrides().get(sid) or getattr(svc, "config", {}).get("check_schedule"),
-                default_minutes=30,
-            )
-            scheduler.add_job(
-                func=engine.check_one,
-                trigger=spec.trigger,
-                id=job_id,
-                args=[sid],
-                max_instances=1,
-                coalesce=True,
-                misfire_grace_time=60,
-                **spec.kwargs,
-            )
+            if not bool(getattr(svc, "config", {}).get("_disabled", False)):
+                overrides_now = get_overrides()
+                v = str(overrides_now.get(sid) or "").strip()
+                enabled_now = bool(get_auto_check_enabled_map().get(sid, False))
+                if v.lower() in ("off", "pause", "paused", "disabled", "disable"):
+                    enabled_now = False
+                if enabled_now:
+                    spec = parse_check_schedule(
+                        overrides_now.get(sid) or getattr(svc, "config", {}).get("check_schedule"),
+                        default_minutes=30,
+                    )
+                    scheduler.add_job(
+                        func=engine.check_one,
+                        trigger=spec.trigger,
+                        id=job_id,
+                        args=[sid],
+                        max_instances=1,
+                        coalesce=True,
+                        misfire_grace_time=60,
+                        **spec.kwargs,
+                    )
 
         return jsonify({"success": True, "message": "ok"})
 
@@ -415,8 +442,6 @@ def create_app(engine: MonitorEngine, scheduler=None) -> Flask:
                 s["check_schedule"] = v
             if v.lower() in ("off", "pause", "paused", "disabled", "disable"):
                 s["auto_check"] = False
-            elif sid in overrides and v:
-                s["auto_check"] = True
             else:
                 s["auto_check"] = bool(auto_map.get(sid, False))
 
@@ -445,7 +470,7 @@ def create_app(engine: MonitorEngine, scheduler=None) -> Flask:
 
         total = len(services)
         page = max(page, 1)
-        page_size = max(page_size, 1)
+        page_size = min(max(page_size, 1), 200)
         start = (page - 1) * page_size
         end = start + page_size
         items = services[start:end]
@@ -467,11 +492,13 @@ def create_app(engine: MonitorEngine, scheduler=None) -> Flask:
         allowed = set(allowed_service_ids(username, role, list(engine.services.keys())))
         service_id = str(request.args.get("service_id") or "").strip() or None
         retention_days = int(request.args.get("days") or 7)
-        page = int(request.args.get("page") or 1)
-        page_size = int(request.args.get("page_size") or 10)
+        retention_days = min(max(retention_days, 1), 90)
+        page = max(int(request.args.get("page") or 1), 1)
+        page_size = min(max(int(request.args.get("page_size") or 10), 1), 200)
         n = request.args.get("n")
         if n is not None:
-            items = tail_errors(int(n), retention_days=retention_days)
+            nn = min(max(int(n), 1), 200)
+            items = tail_errors(nn, retention_days=retention_days)
             if role != "admin":
                 items = [e for e in items if str(e.get("service_id") or "") in allowed]
             return jsonify({"errors": items, "total": len(items), "page": 1, "page_size": len(items), "pages": 1})
@@ -484,12 +511,10 @@ def create_app(engine: MonitorEngine, scheduler=None) -> Flask:
                 service_id=None,
                 retention_days=retention_days,
                 page=1,
-                page_size=1000000,
+                page_size=2000,
             )
             all_items = [e for e in all_items if str(e.get("service_id") or "") in allowed]
             total = len(all_items)
-            page = max(page, 1)
-            page_size = max(page_size, 1)
             start = (page - 1) * page_size
             end = start + page_size
             items = all_items[start:end]
@@ -509,11 +534,13 @@ def create_app(engine: MonitorEngine, scheduler=None) -> Flask:
         allowed = set(allowed_service_ids(username, role, list(engine.services.keys())))
         service_id = str(request.args.get("service_id") or "").strip() or None
         retention_days = int(request.args.get("days") or 7)
-        page = int(request.args.get("page") or 1)
-        page_size = int(request.args.get("page_size") or 30)
+        retention_days = min(max(retention_days, 1), 90)
+        page = max(int(request.args.get("page") or 1), 1)
+        page_size = min(max(int(request.args.get("page_size") or 30), 1), 200)
         n = request.args.get("n")
         if n is not None:
-            items = tail_events(int(n), retention_days=retention_days)
+            nn = min(max(int(n), 1), 500)
+            items = tail_events(nn, retention_days=retention_days)
             if role != "admin":
                 items = [e for e in items if str(e.get("service_id") or "") in allowed]
             return jsonify({"events": items, "total": len(items), "page": 1, "page_size": len(items), "pages": 1})
@@ -526,12 +553,10 @@ def create_app(engine: MonitorEngine, scheduler=None) -> Flask:
                 service_id=None,
                 retention_days=retention_days,
                 page=1,
-                page_size=1000000,
+                page_size=5000,
             )
             all_items = [e for e in all_items if str(e.get("service_id") or "") in allowed]
             total = len(all_items)
-            page = max(page, 1)
-            page_size = max(page_size, 1)
             start = (page - 1) * page_size
             end = start + page_size
             items = all_items[start:end]

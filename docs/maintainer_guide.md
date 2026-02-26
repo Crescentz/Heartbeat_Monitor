@@ -28,7 +28,7 @@
 ## 4. 定时检测与失败策略
 - [monitor_engine.py](file:///d:/CODE/PyCODE/Heartbeat_Monitor/core/monitor_engine.py)
   - `auto_check: false` 的服务不参与定时检测（仍可手工点“检测”）
-  - `on_failure: alert`：仅记录错误
+  - `on_failure: alert`：失败告警（仅记录错误与事件）
   - `on_failure: restart`：失败后尝试执行 `restart_service()`（要求配置了 restart 命令）
   - 自动处理结果会额外写入错误日志（目前不合并到 `last_test_detail`）
 
@@ -40,6 +40,7 @@
 - 事件日志：[event_log.py](file:///d:/CODE/PyCODE/Heartbeat_Monitor/core/event_log.py)
 - 账号与权限：[user_store.py](file:///d:/CODE/PyCODE/Heartbeat_Monitor/core/user_store.py)、[acl_store.py](file:///d:/CODE/PyCODE/Heartbeat_Monitor/core/acl_store.py)
 - 禁用开关存储：[disabled_service_store.py](file:///d:/CODE/PyCODE/Heartbeat_Monitor/core/disabled_service_store.py)
+- 运维模式（只监控/可运维）存储：[ops_mode_store.py](file:///d:/CODE/PyCODE/Heartbeat_Monitor/core/ops_mode_store.py)（支持单服务与批量切换）
 
 ## 6. SSH 执行与鉴权
 - [ssh_manager.py](file:///d:/CODE/PyCODE/Heartbeat_Monitor/core/ssh_manager.py)

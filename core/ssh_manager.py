@@ -2,6 +2,7 @@ import paramiko
 import logging
 import io
 import os
+from pathlib import Path
 from typing import Optional, Tuple
 
 class SSHManager:
@@ -68,7 +69,7 @@ class SSHManager:
             if sudo:
                 command = f"sudo -S -p '' {command}"
             
-            stdin, stdout, stderr = self.client.exec_command(command)
+            stdin, stdout, stderr = self.client.exec_command(command, get_pty=bool(sudo))
             
             if sudo:
                 stdin.write(self.sudo_password + "\n")
@@ -113,7 +114,8 @@ class SSHManager:
         elif self.private_key_path and str(self.private_key_path).strip():
             path = str(self.private_key_path).strip()
             if not os.path.isabs(path):
-                path = os.path.join(os.getcwd(), path)
+                root_dir = Path(__file__).resolve().parents[1]
+                path = str((root_dir / path).resolve())
             if not os.path.exists(path):
                 raise FileNotFoundError(f"Private key not found: {path}")
             with open(path, "r", encoding="utf-8") as f:

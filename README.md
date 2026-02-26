@@ -11,9 +11,11 @@
    - 模板：`config/services_template.yaml`
    - 样例：`config/samples/`（不自动加载；复制过来再启用）
 2. 填 `category + test_api + expected_response`（可选再填 `restart_cmds` 做自动恢复）
+   - 新增服务纳管后默认先不参与定时检测；登录后在服务列表“频率”列开启“自动检测”并设置频率
 3. 运行自检：`python doctor.py`
 4. 安装依赖：`python -m pip install -r requirements.txt`
 5. 启动：`python main.py`
+   - 环境变量：`HBM_DEBUG=1` 可开启 debug；`HBM_HOST/HBM_PORT` 可修改监听地址与端口
 6. 打开：`http://<监控机IP>:60005/`（会跳转到 `/login`）
 
 首次启动会自动初始化默认超管账号：`admin / admin`（登录后请立刻改密码）。
@@ -55,7 +57,7 @@ python main.py
 ```
 3. 浏览器打开 `http://127.0.0.1:60005/`，用 `admin/admin` 登录后即可看到内置示例服务（见 `config/services/demo_services.yaml`）
 
-另外仓库还内置了一个“失败重启”的完整本机样例（无需本机 SSH）：[local_restart_demo.yaml](file:///d:/CODE/PyCODE/Heartbeat_Monitor/config/samples/local_restart_demo.yaml) + [local_restart_api.py](file:///d:/CODE/PyCODE/Heartbeat_Monitor/local_restart_api.py)（复制到 `config/services/` 后启用）。
+另外仓库还内置了一个“自动重启”的完整本机样例（无需本机 SSH）：[local_restart_demo.yaml](file:///d:/CODE/PyCODE/Heartbeat_Monitor/config/samples/local_restart_demo.yaml) + [local_restart_api.py](file:///d:/CODE/PyCODE/Heartbeat_Monitor/local_restart_api.py)（复制到 `config/services/` 后启用）。
 
 ## 3. 目录结构（你只需要关心这几个）
 - `main.py`：启动入口（不需要因新增服务而改动）
@@ -86,7 +88,8 @@ python main.py
 - `max_elapsed_ms` 可选：慢响应阈值（毫秒），便于区分“可达但很慢”
 - `category` 区分服务类型：`api/web/other`（影响界面展示与按钮可用性）
 - `check_schedule` 控制检测频率：`10s/5m/1h/daily@02:30/weekly@mon 03:00`（可选；不填默认 30m）
-- `on_failure` 控制失败策略：`alert`（仅提示）或 `restart`（自动重启，需配置 `restart_cmds`）
+- `on_failure` 控制失败策略：`alert`（失败告警）或 `restart`（自动重启，需配置 `restart_cmds`）
+- 对“重启后需要启动时间”的服务：可配置 `post_control_check_delay_s`（手工启停后复检延迟）与 `post_auto_restart_check_delay_s`（自动重启后复检延迟）
 - 复杂启停命令建议写成脚本：在 `*_cmds` 里写 `@script:ops_scripts/<service_id>/start.sh`（脚本会自动上传到远端 `/tmp/heartbeat_monitor_scripts/<service_id>/` 并执行）
 
 Mineru 示例： [mineru.yaml](file:///d:/CODE/PyCODE/Heartbeat_Monitor/config/samples/mineru.yaml)（复制到 `config/services/` 后再启用）
@@ -98,6 +101,7 @@ Mineru 示例： [mineru.yaml](file:///d:/CODE/PyCODE/Heartbeat_Monitor/config/s
 - 筛选：关键字（输入自动应用）+ 类别 + 失败策略 + 状态 + 只看失败
 - 按钮：启动/停止/重启/立即检测
 - 超管可直接在表格“频率”列：开关自动检测、点击频率弹窗修改（支持 `off` 关闭）
+- 表格横向滚动：支持顶部同步滚动条与拖拽滚动，不需要拉到页面底部再横向滑动
 - 点击服务行：查看服务描述、配置文件路径、最近一次 API 测试详情（响应摘要/耗时等）
 - “错误日志”：失败原因（时间 + 服务 + 原因）
 - “事件日志”：检测成功/失败、手工启停/重启/检测、自动重启等事件
@@ -109,6 +113,7 @@ Mineru 示例： [mineru.yaml](file:///d:/CODE/PyCODE/Heartbeat_Monitor/config/s
 - 超管可在右上角“管理”里创建用户、重置密码、并把服务绑定给指定用户；普通用户只会看到绑定给自己的服务
 - “管理-服务绑定/检测频率”：修改后会自动保存，也可点“保存变更”批量保存；填 `off` 可关闭某服务的自动检测
 - 防误操作：支持“用户级可运维权限”与“服务级只监控/可运维开关”（仅当该服务配置了启停/重启能力时才显示该按钮）
+- 超管右上角支持“一键切换”把“支持运维”的服务批量切到“可运维”，或批量切到“只监控”
 
 ## 7. 新增服务的两种方式
 ### 7.1 只加 YAML（推荐）
@@ -143,4 +148,6 @@ python -m http.server 5173
 - YAML 中包含 SSH/Sudo 密码属于敏感信息，建议：
   - 仅限内网运维主机可读
   - 后续可改为环境变量/独立凭据文件/堡垒机
+- SSH 建议优先使用 `ssh_private_key_path` 引用私钥文件路径，不要把私钥内容写进 YAML；私钥文件权限建议设为仅管理员可读（Linux 可用 `chmod 600`）
+- `data/` 下包含运行态数据（session secret、用户文件、日志、开关持久化文件等），不应提交到仓库（已在 `.gitignore` 中默认忽略）
 - 首次启动默认 `admin/admin` 仅用于初始化，必须尽快修改密码

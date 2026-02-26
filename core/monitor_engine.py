@@ -61,7 +61,8 @@ class MonitorEngine:
         if not ok:
             append_error(service.service_id, service.name, msg)
             if auto_detail.get("auto_action") == "restart":
-                append_error(service.service_id, service.name, f"Auto-restart: {auto_detail.get('auto_message')}")
+                if not bool(auto_detail.get("auto_ok")):
+                    append_error(service.service_id, service.name, f"Auto-restart: {auto_detail.get('auto_message')}")
             append_event(service.service_id, service.name, "error", "check", msg or "Unhealthy", detail=detail or {})
             if auto_detail.get("auto_action") == "restart":
                 append_event(
@@ -72,6 +73,31 @@ class MonitorEngine:
                     str(auto_detail.get("auto_message") or ""),
                     detail=auto_detail,
                 )
+                if bool(auto_detail.get("auto_ok")):
+                    delay_s = service.config.get("post_auto_restart_check_delay_s", service.config.get("post_control_check_delay_s"))
+                    if delay_s is None:
+                        delay_s = 5
+                    try:
+                        delay_v = max(float(delay_s), 0.0)
+                    except Exception:
+                        delay_v = 5.0
+                    delay_v = min(delay_v, 120.0)
+                    if delay_v > 0:
+                        append_event(service.service_id, service.name, "info", "restart_wait", f"{delay_v}s")
+                        try:
+                            time.sleep(delay_v)
+                        except Exception:
+                            pass
+                    follow = self.check_one(service_id, allow_fix=False)
+                    append_event(
+                        service.service_id,
+                        service.name,
+                        "info" if follow.ok else "warn",
+                        "check_after_restart",
+                        follow.message,
+                    )
+                    ok = follow.ok
+                    msg = follow.message
         else:
             append_event(service.service_id, service.name, "info", "check", "Healthy", detail=detail or {})
         return CheckResult(ok, msg or ("Healthy" if ok else "Unhealthy"))
@@ -107,7 +133,7 @@ class MonitorEngine:
                 delay_s = service.config.get("post_control_check_delay_s")
                 if delay_s is not None:
                     try:
-                        time.sleep(min(float(delay_s), 10.0))
+                        time.sleep(min(max(float(delay_s), 0.0), 120.0))
                     except Exception:
                         pass
                 r = self.check_one(service_id, allow_fix=False)
@@ -136,7 +162,7 @@ class MonitorEngine:
                 delay_s = service.config.get("post_control_check_delay_s")
                 if delay_s is not None:
                     try:
-                        time.sleep(min(float(delay_s), 10.0))
+                        time.sleep(min(max(float(delay_s), 0.0), 120.0))
                     except Exception:
                         pass
                 r = self.check_one(service_id, allow_fix=False)

@@ -1,5 +1,7 @@
 {
   "policies": {
-    "local_restart_demo": "restart"
+    "local_restart_demo": "restart",
+    "mineru_prod": "restart",
+    "umi_ocr": "restart"
   }
 }

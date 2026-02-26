@@ -1,6 +1,6 @@
 enabled: false
 id: "local_restart_demo"
-name: "本机失败重启样例服务"
+name: "本机自动重启样例服务"
 description: |
   本机服务样例（18081）。可用 local_script 启动本机 Python 子进程，也可改为用 start/stop/restart_cmd(s) 执行任意本机命令。
   复制到 config/services/ 后按需修改并改为 enabled: true。
@@ -10,6 +10,9 @@ check_schedule: "10s"
 on_failure: "restart"
 auto_fix: true
 plugin: "localproc"
+start_restart_on_running: true
+post_control_check_delay_s: 1
+post_auto_restart_check_delay_s: 5
 
 host: "127.0.0.1"
 test_api: "http://127.0.0.1:18081/health"

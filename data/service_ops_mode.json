@@ -1,6 +1,10 @@
 {
   "local_restart_demo": true,
   "local_test_01": true,
-  "mineru_01": true,
-  "local_alert_demo": true
+  "mineru_01": false,
+  "local_alert_demo": false,
+  "mineru_prod": true,
+  "umi_ocr": true,
+  "xinference_xinf": true,
+  "office_to_pdf": false
 }

@@ -3,6 +3,9 @@
     "local_restart_demo": "30s",
     "local_test_01": "120s",
     "mineru_01": "1m",
-    "local_alert_demo": "30s"
+    "local_alert_demo": "30s",
+    "mineru_prod": "5m",
+    "office_to_pdf": "off",
+    "umi_ocr": "1m"
   }
 }
