@@ -6,6 +6,7 @@
     ],
     "local_restart_demo": [
       "test02"
-    ]
+    ],
+    "local_alert_demo": []
   }
 }

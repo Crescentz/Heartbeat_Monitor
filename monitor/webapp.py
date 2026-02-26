@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Dict
 
 from flask import Flask, jsonify, redirect, render_template, request, session, url_for
 
@@ -9,10 +10,12 @@ from core.acl_store import allowed_service_ids, get_bindings, set_service_users
 from core.check_schedule import job_id_for_service, parse_check_schedule
 from core.schedule_override_store import get_overrides, set_override
 from core.disabled_service_store import get_disabled_map, set_disabled
-from core.user_store import create_user, delete_user, ensure_default_admin, list_users, set_password, verify_login
+from core.ops_mode_store import get_ops_enabled_map, seed_ops_enabled, set_ops_enabled
+from core.user_store import create_user, delete_user, ensure_default_admin, get_user, list_users, set_can_control, set_password, verify_login
 from core.error_log import query_errors, tail_errors
 from core.event_log import query_events, tail_events
 from core.monitor_engine import MonitorEngine
+from core.app_info import APP_INFO
 
 
 def create_app(engine: MonitorEngine, scheduler=None) -> Flask:
@@ -26,22 +29,37 @@ def create_app(engine: MonitorEngine, scheduler=None) -> Flask:
     app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax")
     created_admin = ensure_default_admin()
     disabled_map = get_disabled_map()
+    seed_ops_enabled(sorted(list(engine.services.keys())), default_enabled=True)
+    ops_enabled_map = get_ops_enabled_map()
     for sid, svc in engine.services.items():
         if isinstance(getattr(svc, "config", None), dict) and disabled_map.get(str(sid)):
             svc.config["_disabled"] = True
+        if isinstance(getattr(svc, "config", None), dict):
+            svc.config["_ops_enabled"] = bool(ops_enabled_map.get(str(sid), False))
 
-    def _current_user() -> tuple[str, str]:
-        return str(session.get("username") or ""), str(session.get("role") or "user")
+    def _current_user() -> tuple[str, str, bool]:
+        username = str(session.get("username") or "")
+        role = str(session.get("role") or "user")
+        if role == "admin":
+            return username, role, True
+        u = get_user(username) if username else None
+        return username, role, bool(getattr(u, "can_control", False)) if u else False
 
     def _is_admin() -> bool:
         return str(session.get("role") or "") == "admin"
 
     @app.get("/")
     def index():
-        username, role = _current_user()
+        username, role, can_control = _current_user()
         allowed = set(allowed_service_ids(username, role, list(engine.services.keys())))
         errors = [e for e in tail_errors(10) if str(e.get("service_id") or "") in allowed] if role != "admin" else tail_errors(10)
-        return render_template("index.html", services=[], errors=errors, user={"username": username, "role": role})
+        return render_template(
+            "index.html",
+            services=[],
+            errors=errors,
+            user={"username": username, "role": role, "can_control": can_control},
+            app_info=APP_INFO,
+        )
 
     @app.get("/login")
     def login():
@@ -86,12 +104,12 @@ def create_app(engine: MonitorEngine, scheduler=None) -> Flask:
 
     @app.get("/api/me")
     def api_me():
-        username, role = _current_user()
-        return jsonify({"username": username, "role": role})
+        username, role, can_control = _current_user()
+        return jsonify({"username": username, "role": role, "can_control": can_control})
 
     @app.put("/api/me/password")
     def api_me_password():
-        username, _ = _current_user()
+        username, _, _ = _current_user()
         payload = request.get_json(silent=True) or {}
         ok, msg = set_password(username, payload.get("password"))
         return jsonify({"success": ok, "message": msg}), (200 if ok else 400)
@@ -100,14 +118,21 @@ def create_app(engine: MonitorEngine, scheduler=None) -> Flask:
     def api_admin_users():
         if not _is_admin():
             return jsonify({"error": "forbidden"}), 403
-        return jsonify({"users": [{"username": u.username, "role": u.role} for u in list_users()]})
+        return jsonify(
+            {"users": [{"username": u.username, "role": u.role, "can_control": bool(getattr(u, "can_control", False))} for u in list_users()]}
+        )
 
     @app.post("/api/admin/users")
     def api_admin_create_user():
         if not _is_admin():
             return jsonify({"error": "forbidden"}), 403
         payload = request.get_json(silent=True) or {}
-        ok, msg = create_user(payload.get("username"), payload.get("password"), payload.get("role") or "user")
+        ok, msg = create_user(
+            payload.get("username"),
+            payload.get("password"),
+            payload.get("role") or "user",
+            can_control=bool(payload.get("can_control")) if "can_control" in payload else None,
+        )
         return jsonify({"success": ok, "message": msg}), (200 if ok else 400)
 
     @app.delete("/api/admin/users/<username>")
@@ -124,6 +149,35 @@ def create_app(engine: MonitorEngine, scheduler=None) -> Flask:
         payload = request.get_json(silent=True) or {}
         ok, msg = set_password(username, payload.get("password"))
         return jsonify({"success": ok, "message": msg}), (200 if ok else 400)
+
+    @app.put("/api/admin/users/<username>/control")
+    def api_admin_set_user_control(username: str):
+        if not _is_admin():
+            return jsonify({"error": "forbidden"}), 403
+        payload = request.get_json(silent=True) or {}
+        ok, msg = set_can_control(username, bool(payload.get("can_control")))
+        return jsonify({"success": ok, "message": msg}), (200 if ok else 400)
+
+    @app.get("/api/admin/ops_mode")
+    def api_admin_ops_mode():
+        if not _is_admin():
+            return jsonify({"error": "forbidden"}), 403
+        return jsonify({"ops_enabled": get_ops_enabled_map(), "services": sorted(list(engine.services.keys()))})
+
+    @app.put("/api/admin/ops_mode")
+    def api_admin_set_ops_mode():
+        if not _is_admin():
+            return jsonify({"error": "forbidden"}), 403
+        payload = request.get_json(silent=True) or {}
+        sid = str(payload.get("service_id") or "").strip()
+        enabled = bool(payload.get("ops_enabled"))
+        if sid not in engine.services:
+            return jsonify({"success": False, "message": "service_not_found"}), 400
+        set_ops_enabled(sid, enabled)
+        svc = engine.services[sid]
+        if isinstance(getattr(svc, "config", None), dict):
+            svc.config["_ops_enabled"] = enabled
+        return jsonify({"success": True, "message": "ok"})
 
     @app.get("/api/admin/bindings")
     def api_admin_bindings():
@@ -151,7 +205,7 @@ def create_app(engine: MonitorEngine, scheduler=None) -> Flask:
     def api_admin_schedules():
         if not _is_admin():
             return jsonify({"error": "forbidden"}), 403
-        base: dict[str, str] = {}
+        base: Dict[str, str] = {}
         for sid, svc in engine.services.items():
             base[str(sid)] = str(getattr(svc, "config", {}).get("check_schedule") or "").strip()
         return jsonify({"overrides": get_overrides(), "base": base})
@@ -171,15 +225,29 @@ def create_app(engine: MonitorEngine, scheduler=None) -> Flask:
         if isinstance(getattr(svc, "config", None), dict) and base_key not in svc.config:
             svc.config[base_key] = str(svc.config.get("check_schedule") or "").strip()
 
+        if schedule_str and schedule_str.lower() in ("off", "pause", "paused", "disabled", "disable"):
+            set_override(sid, "off")
+            if isinstance(getattr(svc, "config", None), dict):
+                svc.config["auto_check"] = False
+            if scheduler is not None:
+                job_id = job_id_for_service(sid)
+                try:
+                    scheduler.remove_job(job_id)
+                except Exception:
+                    pass
+            return jsonify({"success": True, "message": "ok"})
+
         if schedule_str:
             parse_check_schedule(schedule_str, default_minutes=30)
             set_override(sid, schedule_str)
             if isinstance(getattr(svc, "config", None), dict):
                 svc.config["check_schedule"] = schedule_str
+                svc.config["auto_check"] = True
         else:
             set_override(sid, "")
             if isinstance(getattr(svc, "config", None), dict):
                 svc.config["check_schedule"] = str(svc.config.get(base_key) or "").strip()
+                svc.config["auto_check"] = True
 
         if scheduler is not None and bool(getattr(svc, "config", {}).get("auto_check", True)):
             job_id = job_id_for_service(sid)
@@ -249,10 +317,12 @@ def create_app(engine: MonitorEngine, scheduler=None) -> Flask:
 
     @app.get("/api/services")
     def api_services():
-        username, role = _current_user()
+        username, role, can_control = _current_user()
         allowed = set(allowed_service_ids(username, role, list(engine.services.keys())))
+        q = str(request.args.get("q") or "").strip().lower()
         category = str(request.args.get("category") or "").strip().lower()
         on_failure = str(request.args.get("on_failure") or "").strip().lower()
+        status = str(request.args.get("status") or "").strip().lower()
         only_failed = str(request.args.get("only_failed") or "").strip().lower() in ("1", "true", "yes", "on")
         page = int(request.args.get("page") or 1)
         page_size = int(request.args.get("page_size") or 5)
@@ -262,15 +332,34 @@ def create_app(engine: MonitorEngine, scheduler=None) -> Flask:
         services.sort(key=lambda x: str(x.get("id") or ""))
         if role != "admin":
             services = [s for s in services if str(s.get("id") or "") in allowed]
+            if not can_control:
+                for s in services:
+                    s["can_start"] = False
+                    s["can_stop"] = False
+                    s["can_restart"] = False
         for s in services:
             sid = str(s.get("id") or "")
             if sid in overrides:
-                s["check_schedule"] = overrides[sid]
+                v = str(overrides[sid] or "").strip()
+                s["check_schedule"] = v
+                if v.lower() in ("off", "pause", "paused", "disabled", "disable"):
+                    s["auto_check"] = False
 
+        if q:
+            def _hit(x: dict) -> bool:
+                return any(
+                    q in str(x.get(k) or "").lower()
+                    for k in ("id", "name", "host", "test_api", "description", "category")
+                )
+            services = [s for s in services if _hit(s)]
         if category and category != "all":
             services = [s for s in services if str(s.get("category") or "").lower() == category]
         if on_failure and on_failure != "all":
             services = [s for s in services if str(s.get("on_failure") or "").lower() == on_failure]
+        if status and status != "all":
+            mapping = {"running": "Running", "error": "Error", "disabled": "Disabled", "unknown": "Unknown"}
+            want = mapping.get(status, status)
+            services = [s for s in services if str(s.get("status") or "") == want]
         if only_failed:
             services = [s for s in services if str(s.get("status") or "") == "Error"]
 
@@ -294,7 +383,7 @@ def create_app(engine: MonitorEngine, scheduler=None) -> Flask:
 
     @app.get("/api/errors")
     def api_errors():
-        username, role = _current_user()
+        username, role, _ = _current_user()
         allowed = set(allowed_service_ids(username, role, list(engine.services.keys())))
         service_id = str(request.args.get("service_id") or "").strip() or None
         retention_days = int(request.args.get("days") or 7)
@@ -336,7 +425,7 @@ def create_app(engine: MonitorEngine, scheduler=None) -> Flask:
 
     @app.get("/api/events")
     def api_events():
-        username, role = _current_user()
+        username, role, _ = _current_user()
         allowed = set(allowed_service_ids(username, role, list(engine.services.keys())))
         service_id = str(request.args.get("service_id") or "").strip() or None
         retention_days = int(request.args.get("days") or 7)
@@ -378,11 +467,14 @@ def create_app(engine: MonitorEngine, scheduler=None) -> Flask:
 
     @app.post("/api/control/<service_id>/<action>")
     def api_control(service_id: str, action: str):
-        username, role = _current_user()
+        username, role, can_control = _current_user()
         allowed = set(allowed_service_ids(username, role, list(engine.services.keys())))
         if role != "admin" and service_id not in allowed:
             return jsonify({"success": False, "message": "forbidden"}), 403
-        ok, msg = engine.control(service_id, action)
+        if action in ("start", "stop", "restart") and role != "admin" and not can_control:
+            return jsonify({"success": False, "message": "control_not_authorized"}), 403
+        allow_fix = True if role == "admin" or can_control else False
+        ok, msg = engine.control(service_id, action, allow_fix=allow_fix)
         return jsonify({"success": ok, "message": msg})
 
     return app

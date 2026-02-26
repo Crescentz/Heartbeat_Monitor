@@ -88,9 +88,10 @@ Heartbeat_Monitor/
   - 安装依赖：`python -m pip install -r requirements.txt`
   - 启动前自检：`python doctor.py`
   - 运行：`python main.py`
-  - 访问：`http://<监控机IP>:5000/`
+  - 访问：`http://<监控机IP>:60005/`
 - **新增服务（推荐：仅YAML）**：
   - 复制 [services_template.yaml](file:///d:/CODE/PyCODE/Heartbeat_Monitor/config/services_template.yaml) 为 `config/services/<你的服务>.yaml`
+  - 或复制 `config/samples/*.yaml` 到 `config/services/` 后再按需修改
   - 填写 `category / test_api / expected_response`，并用 `on_failure` 选择失败策略（仅提示/自动重启）
   - 无需修改 `main.py`
 - **新增服务（插件方式：适用于非标准API）**：

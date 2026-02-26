@@ -21,6 +21,7 @@
         <div class="text-muted small">本页面为纯前端静态预览，不依赖后端接口</div>
       </div>
       <div class="d-flex gap-2">
+        <button class="btn btn-outline-secondary btn-sm" type="button" data-bs-toggle="modal" data-bs-target="#appInfoModal">项目信息</button>
         <button class="btn btn-outline-secondary btn-sm" onclick="location.reload()">刷新</button>
       </div>
     </div>
@@ -29,6 +30,10 @@
       <div class="card-header">筛选</div>
       <div class="card-body">
         <div class="row g-2 align-items-end">
+          <div class="col-12 col-md-3">
+            <label class="form-label mb-1">关键字</label>
+            <input class="form-control form-control-sm" id="filterQ" placeholder="服务名/ID/host/检测地址/描述/类别">
+          </div>
           <div class="col-12 col-md-3">
             <label class="form-label mb-1">类别</label>
             <select class="form-select form-select-sm" id="filterCategory">
@@ -46,13 +51,23 @@
               <option value="restart">失败重启</option>
             </select>
           </div>
-          <div class="col-12 col-md-3">
+          <div class="col-12 col-md-2">
+            <label class="form-label mb-1">状态</label>
+            <select class="form-select form-select-sm" id="filterStatus">
+              <option value="all">全部</option>
+              <option value="running">Running</option>
+              <option value="error">Error</option>
+              <option value="disabled">Disabled</option>
+              <option value="unknown">Unknown</option>
+            </select>
+          </div>
+          <div class="col-12 col-md-1">
             <div class="form-check">
               <input class="form-check-input" type="checkbox" id="filterOnlyFailed">
               <label class="form-check-label" for="filterOnlyFailed">只看失败服务</label>
             </div>
           </div>
-          <div class="col-12 col-md-3 d-flex gap-2 justify-content-md-end">
+          <div class="col-12 col-md-2 d-flex gap-2 justify-content-md-end">
             <button class="btn btn-primary btn-sm" id="applyFilters">应用</button>
             <button class="btn btn-outline-secondary btn-sm" id="resetFilters">重置</button>
           </div>
@@ -102,6 +117,43 @@
   </div>
 
   <div id="modalsRoot"></div>
+  <div class="modal fade" id="appInfoModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">项目信息</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <div class="row g-3">
+            <div class="col-12 col-lg-4">
+              <div class="border rounded p-3 bg-white">
+                <div class="text-muted small">版本</div>
+                <div class="fw-semibold">1.2.0</div>
+                <div class="mt-2 text-muted small">作者</div>
+                <div class="fw-semibold">CC</div>
+                <div class="mt-2 text-muted small">更新时间</div>
+                <div class="fw-semibold">2026-02-26</div>
+              </div>
+            </div>
+            <div class="col-12 col-lg-8">
+              <div class="border rounded p-3 bg-white">
+                <div class="fw-semibold mb-2">更新内容（示例）</div>
+                <ul class="mb-0">
+                  <li>服务列表横向滚动与拖拽滚动</li>
+                  <li>筛选增强：关键字/类别/失败策略/状态</li>
+                  <li>项目信息弹窗：版本/更新时间/更新记录</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">关闭</button>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
   <script>
@@ -123,7 +175,7 @@
         failure_rate: "3.12%",
         host: "192.168.1.100",
         test_api: "http://192.168.1.100:8000/ocr",
-        config_path: "config/services/mineru.yaml",
+        config_path: "config/samples/mineru.yaml",
         last_test_detail: { ok: true, status_code: 200, elapsed_ms: 843, response_excerpt: "..." }
       },
       {
@@ -189,7 +241,8 @@
         .replaceAll("'", "&#039;");
     }
 
-    const state = { category: "all", on_failure: "all", only_failed: false, page: 1, page_size: 5 };
+    const state = { q: "", category: "all", on_failure: "all", status: "all", only_failed: false, page: 1, page_size: 5 };
+    const serviceIndex = {};
 
     function policyBadge(s) {
       const policy = !s.auto_check ? "不自动" : (s.on_failure === "restart" ? "失败重启" : "仅提示");
@@ -197,10 +250,120 @@
       return `<span class="badge ${cls}">${escapeHtml(policy)}</span>`;
     }
 
+    function normalizeOpsDoc(doc) {
+      if (!doc) return {};
+      if (typeof doc === "string") return { notes: doc };
+      if (typeof doc === "object") return doc;
+      return {};
+    }
+
+    function renderLines(value, emptyText) {
+      const lines = Array.isArray(value) ? value : (typeof value === "string" ? value.split("\n") : []);
+      const clean = lines.map(x => String(x).trim()).filter(Boolean);
+      if (!clean.length) return `<div class="text-muted">${escapeHtml(emptyText)}</div>`;
+      return `<ul class="mb-0">${clean.map(x => `<li>${escapeHtml(x)}</li>`).join("")}</ul>`;
+    }
+
+    function renderPre(value, emptyText) {
+      const v = String(value || "").trim();
+      if (!v) return `<div class="text-muted">${escapeHtml(emptyText)}</div>`;
+      return `<pre class="border rounded p-2 bg-light mb-0" style="white-space: pre-wrap;">${escapeHtml(v)}</pre>`;
+    }
+
+    // ===== 扩展点@运维文档模板：固定结构在此调整 =====
+    function buildOpsDocHtml(s) {
+      const doc = normalizeOpsDoc(s.ops_doc);
+      const onFailure = String(s.on_failure || "alert");
+      const failureHint = onFailure === "restart" ? "失败后自动重启（可在事件日志查看重启结果）" : "失败仅提示人工处理";
+      return `
+        <div class="mb-3">
+          <div class="fw-semibold mb-2">基础信息</div>
+          <div class="row g-2">
+            <div class="col-12 col-md-6"><span class="text-muted">服务名：</span>${escapeHtml(s.name || s.id || "")}</div>
+            <div class="col-12 col-md-6"><span class="text-muted">服务ID：</span>${escapeHtml(s.id || "")}</div>
+            <div class="col-12 col-md-6"><span class="text-muted">类别：</span>${escapeHtml(s.category || "")}</div>
+            <div class="col-12 col-md-6"><span class="text-muted">主机：</span>${escapeHtml(s.host || "")}</div>
+            <div class="col-12"><span class="text-muted">描述：</span>${escapeHtml(s.description || "")}</div>
+          </div>
+        </div>
+        <div class="mb-3">
+          <div class="fw-semibold mb-2">监控与策略</div>
+          <div class="row g-2">
+            <div class="col-12 col-md-6"><span class="text-muted">检测地址：</span><code>${escapeHtml(s.test_api || "")}</code></div>
+            <div class="col-12 col-md-6"><span class="text-muted">检测频率：</span><code>${escapeHtml(s.check_schedule || "") || "30m(默认)"}</code></div>
+            <div class="col-12 col-md-6"><span class="text-muted">自动检测：</span>${escapeHtml(String(!!s.auto_check))}</div>
+            <div class="col-12 col-md-6"><span class="text-muted">失败策略：</span>${escapeHtml(onFailure)}</div>
+          </div>
+          <div class="text-muted mt-2">${escapeHtml(doc.monitor || failureHint)}</div>
+        </div>
+        <div class="mb-3">
+          <div class="fw-semibold mb-2">运维操作</div>
+          <div class="mb-2"><span class="text-muted">启动：</span>${renderLines(doc.start_steps || s.start_cmds, "未配置")}</div>
+          <div class="mb-2"><span class="text-muted">停止：</span>${renderLines(doc.stop_steps || s.stop_cmds, "未配置")}</div>
+          <div class="mb-2"><span class="text-muted">重启：</span>${renderLines(doc.restart_steps || s.restart_cmds, "未配置")}</div>
+          <div class="mb-2"><span class="text-muted">手工操作：</span>${renderLines(doc.manual_ops, "未配置")}</div>
+        </div>
+        <div class="mb-3">
+          <div class="fw-semibold mb-2">API 文档</div>
+          ${renderPre(doc.api_doc, "未配置")}
+        </div>
+        <div class="mb-3">
+          <div class="fw-semibold mb-2">故障处理</div>
+          ${renderLines(doc.troubleshooting || doc.fallback, failureHint)}
+        </div>
+        <div class="mb-0">
+          <div class="fw-semibold mb-2">联系人/备注</div>
+          <div class="mb-2"><span class="text-muted">联系人：</span>${renderLines(doc.contacts, "未配置")}</div>
+          <div><span class="text-muted">备注：</span>${renderLines(doc.notes, "未配置")}</div>
+        </div>
+      `;
+    }
+
+    function openOpsDoc(serviceId) {
+      const sid = String(serviceId || "");
+      const s = serviceIndex[sid];
+      if (!s) return;
+      const modalId = "opsDocModal";
+      const root = document.getElementById("modalsRoot");
+      const exists = document.getElementById(modalId);
+      if (exists) exists.remove();
+      root.insertAdjacentHTML("beforeend", `
+        <div class="modal fade" id="${modalId}" tabindex="-1" aria-hidden="true">
+          <div class="modal-dialog modal-xl modal-dialog-scrollable">
+            <div class="modal-content">
+              <div class="modal-header">
+                <h5 class="modal-title">${escapeHtml(s.name || s.id || "")} - 运维文档</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+              </div>
+              <div class="modal-body">
+                ${buildOpsDocHtml(s)}
+              </div>
+            </div>
+          </div>
+        </div>
+      `);
+      const el = document.getElementById(modalId);
+      const modal = new bootstrap.Modal(el);
+      el.addEventListener("hidden.bs.modal", () => el.remove(), { once: true });
+      modal.show();
+    }
+
     function getFilteredServices() {
       let out = services.slice();
+      if (state.q) {
+        const q = String(state.q || "").toLowerCase();
+        out = out.filter(s => {
+          const parts = [s.id, s.name, s.host, s.test_api, s.description, s.category].map(x => String(x || "").toLowerCase());
+          return parts.some(x => x.includes(q));
+        });
+      }
       if (state.category !== "all") out = out.filter(s => String(s.category || "").toLowerCase() === state.category);
       if (state.on_failure !== "all") out = out.filter(s => String(s.on_failure || "").toLowerCase() === state.on_failure);
+      if (state.status !== "all") {
+        const map = { running: "Running", error: "Error", disabled: "Disabled", unknown: "Unknown" };
+        const want = map[state.status] || state.status;
+        out = out.filter(s => String(s.status || "") === want);
+      }
       if (state.only_failed) out = out.filter(s => String(s.status || "") === "Error");
       return out;
     }
@@ -224,6 +387,9 @@
         return;
       }
 
+      pageItems.forEach(s => {
+        serviceIndex[String(s.id || "")] = s;
+      });
       body.innerHTML = pageItems.map((s, idx) => {
         const seq = start + idx + 1;
         return `
@@ -275,6 +441,7 @@
                   ${s.last_error ? `<div class="alert alert-danger mt-3 mb-0"><div class="fw-semibold">最后错误</div><div>${escapeHtml(s.last_error)}</div></div>` : ""}
                   <div class="d-flex justify-content-end mt-3">
                     <button class="btn btn-outline-primary btn-sm" onclick="openServiceLogs('${escapeHtml(s.id)}','${escapeHtml(s.name)}')">查看该服务7天错误日志</button>
+                    <button class="btn btn-outline-success btn-sm ms-2" onclick="openOpsDoc('${escapeHtml(s.id)}')">运维文档</button>
                   </div>
                 </div>
               </div>
@@ -326,19 +493,29 @@
     }
 
     function bindFilters() {
+      document.getElementById("filterQ").onkeydown = (e) => {
+        if (e.key !== "Enter") return;
+        document.getElementById("applyFilters").click();
+      };
       document.getElementById("applyFilters").onclick = () => {
+        state.q = String(document.getElementById("filterQ").value || "").trim();
         state.category = document.getElementById("filterCategory").value;
         state.on_failure = document.getElementById("filterFailure").value;
+        state.status = document.getElementById("filterStatus").value;
         state.only_failed = document.getElementById("filterOnlyFailed").checked;
         state.page = 1;
         renderServices();
       };
       document.getElementById("resetFilters").onclick = () => {
+        document.getElementById("filterQ").value = "";
         document.getElementById("filterCategory").value = "all";
         document.getElementById("filterFailure").value = "all";
+        document.getElementById("filterStatus").value = "all";
         document.getElementById("filterOnlyFailed").checked = false;
+        state.q = "";
         state.category = "all";
         state.on_failure = "all";
+        state.status = "all";
         state.only_failed = false;
         state.page = 1;
         renderServices();

@@ -8,7 +8,8 @@
     {
       "username": "test01",
       "password_hash": "scrypt:32768:8:1$OUwmJqt8hRNJiXNg$098ec195904dd5fead6bb4dcb321b24e7973034a9bafcc8034c2b3edca75a3ca574ca9ad5e07bdb6f0ee9a4f871c32eb13b56172b4d89aab8fc390ab813b7dfb",
-      "role": "user"
+      "role": "user",
+      "can_control": false
     },
     {
       "username": "test02",

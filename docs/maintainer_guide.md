@@ -6,6 +6,7 @@
   - 目录初始化（data/logs）
   - 加载服务：`config/services/*.yaml`
   - 启动定时检测（按服务独立建 job；未配置 `check_schedule` 时默认 30m）
+  - 启动后全量检查：放在后台线程执行，避免 Web 端口启动被阻塞
   - 启动 Flask Web
 
 ## 2. 服务加载机制（新增服务不改 main.py）
@@ -34,6 +35,7 @@
 ## 5. Web 运维界面
 - 后端路由：[webapp.py](file:///d:/CODE/PyCODE/Heartbeat_Monitor/monitor/webapp.py)
 - 模板：[index.html](file:///d:/CODE/PyCODE/Heartbeat_Monitor/templates/index.html)
+- 项目信息弹窗：右上角“项目信息”按钮触发；数据源：[app_info.py](file:///d:/CODE/PyCODE/Heartbeat_Monitor/core/app_info.py)（作者/版本/更新时间/更新记录）
 - 错误日志：[error_log.py](file:///d:/CODE/PyCODE/Heartbeat_Monitor/core/error_log.py)
 - 事件日志：[event_log.py](file:///d:/CODE/PyCODE/Heartbeat_Monitor/core/event_log.py)
 - 账号与权限：[user_store.py](file:///d:/CODE/PyCODE/Heartbeat_Monitor/core/user_store.py)、[acl_store.py](file:///d:/CODE/PyCODE/Heartbeat_Monitor/core/acl_store.py)
@@ -44,6 +46,13 @@
   - 支持密码与私钥（OpenSSH）两种登录方式
   - 支持 sudo（向 stdin 写入 sudo_password）
   - 支持命令包装器（如 `ssh_command_wrapper: bash -lc`），适配 conda/source 等场景
+  - 支持脚本上传（用于 `@script:` 方式的复杂启停命令）
+
+## 6.1 复杂启停命令：@script 机制
+- 入口：服务 YAML 的 `start_cmds/stop_cmds/restart_cmds`
+- 写法：`@script:ops_scripts/<service_id>/<name>.sh`
+- 行为：上传到远端 `/tmp/heartbeat_monitor_scripts/<service_id>/`，执行 `bash <remote_script>`
+- 实现：GenericService / MineruService 的 `_run_cmds`
 
 ## 7. 自检脚本（改配置先跑）
 - [doctor.py](file:///d:/CODE/PyCODE/Heartbeat_Monitor/doctor.py)

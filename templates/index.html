@@ -6,6 +6,8 @@
   <title>内网服务心跳监控</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
   <style>
+    :root { --hb-border: rgba(0,0,0,.08); }
+    body { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
     .status-pill { display: inline-block; padding: 2px 10px; border-radius: 999px; font-weight: 700; letter-spacing: .2px; }
     .status-running { color: #0f5132; background: rgba(25,135,84,.16); border: 1px solid rgba(25,135,84,.28); }
     .status-error { color: #842029; background: rgba(220,53,69,.16); border: 1px solid rgba(220,53,69,.28); }
@@ -13,35 +15,57 @@
     .status-unknown { color: #055160; background: rgba(13,202,240,.14); border: 1px solid rgba(13,202,240,.28); }
     .log-box { max-height: 280px; overflow-y: auto; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; font-size: 12px; }
     .service-row { cursor: pointer; }
-    .table-responsive { overflow-x: auto; }
-    #servicesTable { min-width: 1600px; table-layout: fixed; }
-    #servicesTable th { position: relative; }
+    .table-responsive { overflow-x: auto; overflow-y: hidden; width: 100%; -webkit-overflow-scrolling: touch; scrollbar-gutter: stable; }
+    #servicesTable { min-width: 1830px; width: max-content; table-layout: fixed; }
+    #servicesTable thead th { position: sticky; top: 0; z-index: 2; background: rgba(248,249,250,0.98); }
     .col-resizer { position: absolute; top: 0; right: 0; width: 8px; height: 100%; cursor: col-resize; user-select: none; }
     .col-resizer::after { content: ""; position: absolute; top: 0; left: 3px; width: 2px; height: 100%; background: rgba(0,0,0,0.08); }
+    .card { border-color: var(--hb-border); }
+    .card-header { background: rgba(248,249,250,.9); border-bottom-color: var(--hb-border); font-weight: 600; }
+    .table { font-size: 13px; }
+    .table thead th { white-space: nowrap; }
+    .table td { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    td.td-actions { overflow: visible; white-space: normal; }
+    td.td-schedule { overflow: visible; white-space: normal; }
+    .topbar { position: sticky; top: 0; z-index: 30; padding-top: 1rem; background: rgba(248,249,250,.72); backdrop-filter: blur(10px); }
+    .topbar-inner { background: rgba(255,255,255,.92); }
   </style>
 </head>
 <body class="bg-light">
-  <div class="container py-4">
-    <div class="d-flex justify-content-between align-items-center mb-3">
+  <div class="container-fluid py-4 px-4" style="max-width: 1900px;">
+    <div class="topbar mb-3">
+      <div class="d-flex justify-content-between align-items-center p-3 border rounded shadow-sm topbar-inner">
       <div>
         <h3 class="mb-0">内网服务心跳监控中心</h3>
-        <div class="text-muted small">服务数量：<span id="serviceCount">-</span></div>
+        <div class="text-muted small">服务数量：<span id="serviceCount">-</span> · 最后刷新：<span id="lastRefresh">-</span></div>
       </div>
       <div class="d-flex gap-2">
-        <div class="text-muted small align-self-center">用户：{{ user.username }}{% if user.role == "admin" %}（超管）{% endif %}</div>
+        <div class="text-muted small align-self-center">用户：{{ user.username }}{% if user.role == "admin" %}（超管）{% else %}{% if user.can_control %}（可运维）{% else %}（只监控）{% endif %}{% endif %}</div>
         <button class="btn btn-outline-secondary btn-sm" id="changeMyPwd">改密码</button>
         {% if user.role == "admin" %}
         <button class="btn btn-outline-primary btn-sm" id="openAdmin">管理</button>
         {% endif %}
+        <button class="btn btn-outline-secondary btn-sm" type="button" data-bs-toggle="modal" data-bs-target="#appInfoModal">项目信息</button>
         <a class="btn btn-outline-secondary btn-sm" href="/logout">退出</a>
         <button class="btn btn-outline-secondary btn-sm" onclick="location.reload()">刷新</button>
       </div>
     </div>
+    </div>
 
     <div class="card shadow-sm mb-3">
-      <div class="card-header">筛选</div>
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <div>筛选</div>
+        <div class="d-flex gap-2">
+          <button class="btn btn-primary btn-sm" id="applyFilters">应用</button>
+          <button class="btn btn-outline-secondary btn-sm" id="resetFilters">重置</button>
+        </div>
+      </div>
       <div class="card-body">
         <div class="row g-2 align-items-end">
+          <div class="col-12 col-md-3">
+            <label class="form-label mb-1">关键字</label>
+            <input class="form-control form-control-sm" id="filterQ" placeholder="服务名/ID/host/检测地址/描述/类别">
+          </div>
           <div class="col-12 col-md-3">
             <label class="form-label mb-1">类别</label>
             <select class="form-select form-select-sm" id="filterCategory">
@@ -59,15 +83,21 @@
               <option value="restart">失败重启</option>
             </select>
           </div>
-          <div class="col-12 col-md-3">
+          <div class="col-12 col-md-2">
+            <label class="form-label mb-1">状态</label>
+            <select class="form-select form-select-sm" id="filterStatus">
+              <option value="all">全部</option>
+              <option value="running">Running</option>
+              <option value="error">Error</option>
+              <option value="disabled">Disabled</option>
+              <option value="unknown">Unknown</option>
+            </select>
+          </div>
+          <div class="col-12 col-md-1">
             <div class="form-check">
               <input class="form-check-input" type="checkbox" id="filterOnlyFailed">
               <label class="form-check-label" for="filterOnlyFailed">只看失败服务</label>
             </div>
-          </div>
-          <div class="col-12 col-md-3 d-flex gap-2 justify-content-md-end">
-            <button class="btn btn-primary btn-sm" id="applyFilters">应用</button>
-            <button class="btn btn-outline-secondary btn-sm" id="resetFilters">重置</button>
           </div>
         </div>
       </div>
@@ -76,7 +106,7 @@
     <div class="card shadow-sm mb-3">
       <div class="card-header">服务状态</div>
       <div class="card-body p-0">
-        <div class="table-responsive">
+        <div class="table-responsive" id="servicesTableWrap">
           <table class="table table-hover mb-0 align-middle" id="servicesTable">
             <thead class="table-light">
               <tr>
@@ -84,13 +114,13 @@
                 <th style="width: 220px;">服务</th>
                 <th style="width: 90px;">类别</th>
                 <th style="width: 120px;">策略</th>
-                <th style="width: 110px;">频率</th>
+                <th style="width: 170px;">频率</th>
                 <th style="width: 120px;">状态</th>
                 <th style="width: 420px;">检测地址</th>
                 <th style="width: 140px;">运行时长</th>
                 <th style="width: 120px;">故障率</th>
                 <th style="width: 180px;">最后检测</th>
-                <th style="width: 240px;">操作</th>
+                <th style="width: 260px;">操作</th>
               </tr>
             </thead>
             <tbody id="servicesBody"></tbody>
@@ -101,9 +131,16 @@
 
     <div class="d-flex justify-content-between align-items-center mb-3">
       <div class="text-muted small" id="paginationSummary"></div>
-      <div class="btn-group btn-group-sm" role="group" aria-label="Pagination">
-        <button class="btn btn-outline-secondary" id="pagePrev">上一页</button>
-        <button class="btn btn-outline-secondary" id="pageNext">下一页</button>
+      <div class="d-flex gap-2 align-items-center">
+        <select class="form-select form-select-sm" id="pageSize" style="width: 120px;">
+          <option value="5">每页 5</option>
+          <option value="10">每页 10</option>
+          <option value="20">每页 20</option>
+        </select>
+        <div class="btn-group btn-group-sm" role="group" aria-label="Pagination">
+          <button class="btn btn-outline-secondary" id="pagePrev">上一页</button>
+          <button class="btn btn-outline-secondary" id="pageNext">下一页</button>
+        </div>
       </div>
     </div>
 
@@ -133,6 +170,60 @@
 
   <div id="detailModalsRoot"></div>
   <div id="overlayModalsRoot"></div>
+  <div class="modal fade" id="appInfoModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">项目信息</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <div class="row g-3">
+            <div class="col-12 col-lg-4">
+              <div class="border rounded p-3 bg-white">
+                <div class="text-muted small">版本</div>
+                <div class="fw-semibold">{{ app_info.version }}</div>
+                <div class="mt-2 text-muted small">作者</div>
+                <div class="fw-semibold">{{ app_info.author }}</div>
+                <div class="mt-2 text-muted small">更新时间</div>
+                <div class="fw-semibold">{{ app_info.updated_at }}</div>
+              </div>
+            </div>
+            <div class="col-12 col-lg-8">
+              <div class="border rounded p-3 bg-white">
+                <div class="fw-semibold mb-2">{{ app_info.latest.title }}</div>
+                <ul class="mb-0">
+                  {% for x in app_info.latest["items"] %}
+                  <li>{{ x }}</li>
+                  {% endfor %}
+                </ul>
+                <div class="mt-3">
+                  <button class="btn btn-outline-secondary btn-sm" type="button" data-bs-toggle="collapse" data-bs-target="#changelogCollapse">历史更新</button>
+                </div>
+                <div class="collapse mt-2" id="changelogCollapse">
+                  <div class="border rounded p-2 bg-light">
+                    {% for h in app_info.history %}
+                    <div class="mb-2">
+                      <div class="fw-semibold">{{ h.version }} · {{ h.date }}</div>
+                      <ul class="mb-0">
+                        {% for it in h["items"] %}
+                        <li>{{ it }}</li>
+                        {% endfor %}
+                      </ul>
+                    </div>
+                    {% endfor %}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">关闭</button>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
   <script>
@@ -205,20 +296,129 @@
     }
 
     const state = {
+      q: "",
       category: "all",
       on_failure: "all",
+      status: "all",
       only_failed: false,
       page: 1,
-      page_size: 5
+      page_size: 10
     };
+    const serviceIndex = {};
 
     function policyBadge(s) {
-      if (!s.auto_check) return `<span class="badge text-bg-secondary">不自动</span>`;
-      if (String(s.on_failure || "").toLowerCase() === "restart") return `<span class="badge bg-light border border-warning text-warning">失败重启</span>`;
-      return `<span class="badge bg-light border text-secondary">仅提示</span>`;
+      const parts = [];
+      if (String(s.on_failure || "").toLowerCase() === "restart") {
+        parts.push(`<span class="badge bg-light border border-warning text-warning">失败重启</span>`);
+      } else {
+        parts.push(`<span class="badge bg-light border text-secondary">仅提示</span>`);
+      }
+      if (!s.auto_check) {
+        parts.push(`<span class="badge text-bg-secondary">不自动检测</span>`);
+      }
+      return parts.join(" ");
     }
 
-    function openDetailModal(serviceId) {
+    function normalizeOpsDoc(doc) {
+      if (!doc) return {};
+      if (typeof doc === "string") return { notes: doc };
+      if (typeof doc === "object") return doc;
+      return {};
+    }
+
+    function renderLines(value, emptyText) {
+      const lines = Array.isArray(value) ? value : (typeof value === "string" ? value.split("\n") : []);
+      const clean = lines.map(x => String(x).trim()).filter(Boolean);
+      if (!clean.length) return `<div class="text-muted">${escapeHtml(emptyText)}</div>`;
+      return `<ul class="mb-0">${clean.map(x => `<li>${escapeHtml(x)}</li>`).join("")}</ul>`;
+    }
+
+    function renderPre(value, emptyText) {
+      const v = String(value || "").trim();
+      if (!v) return `<div class="text-muted">${escapeHtml(emptyText)}</div>`;
+      return `<pre class="border rounded p-2 bg-light mb-0" style="white-space: pre-wrap;">${escapeHtml(v)}</pre>`;
+    }
+
+    // ===== 扩展点@运维文档模板：固定结构在此调整 =====
+    function buildOpsDocHtml(s) {
+      const doc = normalizeOpsDoc(s.ops_doc);
+      const onFailure = String(s.on_failure || "alert");
+      const failureHint = onFailure === "restart" ? "失败后自动重启（可在事件日志查看重启结果）" : "失败仅提示人工处理";
+      return `
+        <div class="mb-3">
+          <div class="fw-semibold mb-2">基础信息</div>
+          <div class="row g-2">
+            <div class="col-12 col-md-6"><span class="text-muted">服务名：</span>${escapeHtml(s.name || s.id || "")}</div>
+            <div class="col-12 col-md-6"><span class="text-muted">服务ID：</span>${escapeHtml(s.id || "")}</div>
+            <div class="col-12 col-md-6"><span class="text-muted">类别：</span>${escapeHtml(s.category || "")}</div>
+            <div class="col-12 col-md-6"><span class="text-muted">主机：</span>${escapeHtml(s.host || "")}</div>
+            <div class="col-12"><span class="text-muted">描述：</span>${escapeHtml(s.description || "")}</div>
+          </div>
+        </div>
+        <div class="mb-3">
+          <div class="fw-semibold mb-2">监控与策略</div>
+          <div class="row g-2">
+            <div class="col-12 col-md-6"><span class="text-muted">检测地址：</span><code>${escapeHtml(s.test_api || "")}</code></div>
+            <div class="col-12 col-md-6"><span class="text-muted">检测频率：</span><code>${escapeHtml(s.check_schedule || "") || "30m(默认)"}</code></div>
+            <div class="col-12 col-md-6"><span class="text-muted">自动检测：</span>${escapeHtml(String(!!s.auto_check))}</div>
+            <div class="col-12 col-md-6"><span class="text-muted">失败策略：</span>${escapeHtml(onFailure)}</div>
+          </div>
+          <div class="text-muted mt-2">${escapeHtml(doc.monitor || failureHint)}</div>
+        </div>
+        <div class="mb-3">
+          <div class="fw-semibold mb-2">运维操作</div>
+          <div class="mb-2"><span class="text-muted">启动：</span>${renderLines(doc.start_steps || s.start_cmds, "未配置")}</div>
+          <div class="mb-2"><span class="text-muted">停止：</span>${renderLines(doc.stop_steps || s.stop_cmds, "未配置")}</div>
+          <div class="mb-2"><span class="text-muted">重启：</span>${renderLines(doc.restart_steps || s.restart_cmds, "未配置")}</div>
+          <div class="mb-2"><span class="text-muted">手工操作：</span>${renderLines(doc.manual_ops, "未配置")}</div>
+        </div>
+        <div class="mb-3">
+          <div class="fw-semibold mb-2">API 文档</div>
+          ${renderPre(doc.api_doc, "未配置")}
+        </div>
+        <div class="mb-3">
+          <div class="fw-semibold mb-2">故障处理</div>
+          ${renderLines(doc.troubleshooting || doc.fallback, failureHint)}
+        </div>
+        <div class="mb-0">
+          <div class="fw-semibold mb-2">联系人/备注</div>
+          <div class="mb-2"><span class="text-muted">联系人：</span>${renderLines(doc.contacts, "未配置")}</div>
+          <div><span class="text-muted">备注：</span>${renderLines(doc.notes, "未配置")}</div>
+        </div>
+      `;
+    }
+
+    function openOpsDoc(serviceId) {
+      const sid = String(serviceId || "");
+      const s = serviceIndex[sid];
+      if (!s) return;
+      const modalId = "opsDocModal";
+      const root = document.getElementById("overlayModalsRoot");
+      const exists = document.getElementById(modalId);
+      if (exists) exists.remove();
+      root.insertAdjacentHTML("beforeend", `
+        <div class="modal fade" id="${modalId}" tabindex="-1" aria-hidden="true">
+          <div class="modal-dialog modal-xl modal-dialog-scrollable">
+            <div class="modal-content">
+              <div class="modal-header">
+                <h5 class="modal-title">${escapeHtml(s.name || s.id || "")} - 运维文档</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+              </div>
+              <div class="modal-body">
+                ${buildOpsDocHtml(s)}
+              </div>
+            </div>
+          </div>
+        </div>
+      `);
+      const el = document.getElementById(modalId);
+      const modal = bootstrap.Modal.getOrCreateInstance(el);
+      el.addEventListener("hidden.bs.modal", () => el.remove(), { once: true });
+      modal.show();
+    }
+
+    function openDetailModal(ev, serviceId) {
+      if (state.dragScrolling) return;
       const id = `detailModal_${safeId(serviceId)}`;
       const el = document.getElementById(id);
       if (!el) return;
@@ -238,6 +438,9 @@
         return;
       }
 
+      services.forEach(s => {
+        serviceIndex[String(s.id || "")] = s;
+      });
       body.innerHTML = services.map((s, idx) => {
         const seq = (state.page - 1) * state.page_size + idx + 1;
         const cat = escapeHtml(s.category || "");
@@ -245,16 +448,23 @@
         const host = escapeHtml(s.host || "");
         const name = escapeHtml(s.name || s.id || "");
         const sched = escapeHtml(s.check_schedule || "");
+        const baseSched = escapeHtml(s.base_check_schedule || "");
         const canStart = !!s.can_start;
         const canStop = !!s.can_stop;
         const canRestart = !!s.can_restart;
         const sidJson = JSON.stringify(String(s.id || ""));
         const disabled = !!s.disabled;
+        const opsEnabled = !!s.ops_enabled;
+        const opsCapable = !!s.ops_capable;
+        const opsLabel = opsEnabled ? "可运维" : "只监控";
         const statusText = disabled ? "Disabled" : (s.status || "");
         const statusCls = statusClass(statusText);
         const disabledBadge = disabled ? `<span class="badge text-bg-secondary ms-2">已禁用</span>` : "";
+        const opsBadge = (!disabled && opsCapable && !opsEnabled) ? `<span class="badge text-bg-dark ms-2">只监控</span>` : "";
+        const autoCheck = !!s.auto_check;
+        const scheduleText = autoCheck ? (sched || "30m(默认)") : "off";
         return `
-          <tr class="service-row" onclick='openDetailModal(${sidJson})'>
+          <tr class="service-row" onclick='openDetailModal(event, ${sidJson})'>
             <td class="text-muted">${seq}</td>
             <td>
               <div class="fw-semibold">${name}</div>
@@ -262,19 +472,48 @@
             </td>
             <td class="text-muted small">${cat}</td>
             <td>${policyBadge(s)}</td>
-            <td><code>${sched || "30m(默认)"}</code></td>
-            <td><span class="status-pill ${statusCls}">${escapeHtml(statusText)}${disabledBadge}</span></td>
+            <td class="td-schedule">
+              ${
+                currentUser && currentUser.role === "admin"
+                  ? `
+                    <div class="d-flex align-items-center gap-2 no-detail" onclick="event.stopPropagation()">
+                      <a href="javascript:void(0)" class="text-decoration-none" onclick='event.stopPropagation(); openScheduleModal(${sidJson})' title="点击修改自动检测与频率">
+                        <code>${scheduleText}</code>
+                      </a>
+                      <div class="form-check form-switch m-0">
+                        <input class="form-check-input" type="checkbox" ${autoCheck ? "checked" : ""} ${disabled ? "disabled" : ""} onchange='event.stopPropagation(); toggleAutoCheckRow(${sidJson}, this.checked)'>
+                      </div>
+                    </div>
+                    <div class="text-muted small">${baseSched ? `默认：${baseSched}` : ""}</div>
+                  `
+                  : `<code>${scheduleText}</code>`
+              }
+            </td>
+            <td><span class="status-pill ${statusCls}">${escapeHtml(statusText)}${disabledBadge}${opsBadge}</span></td>
             <td class="text-truncate" style="max-width: 360px;">${testApi}</td>
             <td>${escapeHtml(s.uptime || "")}</td>
             <td>${escapeHtml(s.failure_rate || "")}</td>
             <td>${escapeHtml(s.last_check || "")}</td>
-            <td>
-              <div class="d-flex gap-1 no-detail" onclick="event.stopPropagation()">
+            <td class="td-actions">
+              <div class="d-flex flex-wrap gap-1 no-detail" onclick="event.stopPropagation()">
                 <button class="btn btn-success btn-sm" ${canStart && !disabled ? "" : "disabled"} onclick='event.stopPropagation(); showActionModal(${sidJson},"start")'>启动</button>
                 <button class="btn btn-danger btn-sm" ${canStop && !disabled ? "" : "disabled"} onclick='event.stopPropagation(); showActionModal(${sidJson},"stop")'>停止</button>
                 <button class="btn btn-warning btn-sm" ${canRestart && !disabled ? "" : "disabled"} onclick='event.stopPropagation(); showActionModal(${sidJson},"restart")'>重启</button>
                 <button class="btn btn-info btn-sm" ${!disabled ? "" : "disabled"} onclick='event.stopPropagation(); showActionModal(${sidJson},"check")'>检测</button>
-                ${currentUser && currentUser.role === "admin" ? `<button class="btn btn-outline-secondary btn-sm" onclick='event.stopPropagation(); toggleDisabled(${sidJson}, ${disabled ? "false" : "true"})'>${disabled ? "启用" : "禁用"}</button>` : ""}
+                ${
+                  currentUser && currentUser.role === "admin"
+                    ? `
+                      <div class="btn-group">
+                        <button class="btn btn-outline-secondary btn-sm dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">管理</button>
+                        <ul class="dropdown-menu">
+                          <li><a class="dropdown-item" href="javascript:void(0)" onclick='event.stopPropagation(); openScheduleModal(${sidJson})'>自动检测/频率</a></li>
+                          ${opsCapable ? `<li><a class="dropdown-item" href="javascript:void(0)" onclick='event.stopPropagation(); toggleOpsMode(${sidJson}, ${opsEnabled ? "false" : "true"})'>切换：${opsLabel}</a></li>` : ""}
+                          <li><a class="dropdown-item" href="javascript:void(0)" onclick='event.stopPropagation(); toggleDisabled(${sidJson}, ${disabled ? "false" : "true"})'>${disabled ? "启用" : "禁用"}</a></li>
+                        </ul>
+                      </div>
+                    `
+                    : ""
+                }
               </div>
             </td>
           </tr>
@@ -305,6 +544,7 @@
                   <div class="mb-2"><span class="text-muted">自动检测：</span><code>${escapeHtml(String(!!s.auto_check))}</code></div>
                   <div class="mb-2"><span class="text-muted">检测频率：</span><code>${escapeHtml(s.check_schedule || "") || "30m(默认)"}</code></div>
                   <div class="mb-2"><span class="text-muted">失败策略：</span><code>${escapeHtml(s.on_failure || "")}</code></div>
+                  <div class="mb-2"><span class="text-muted">运维模式：</span><code>${escapeHtml(s.ops_enabled ? "可运维" : "只监控")}</code></div>
                   <div class="mb-2"><span class="text-muted">检测地址：</span><code>${escapeHtml(s.test_api || "")}</code></div>
                   <div class="mb-2"><span class="text-muted">API 测试结果：</span></div>
                   <pre class="border rounded p-2 bg-light mb-0" style="white-space: pre-wrap;">${detail}</pre>
@@ -312,6 +552,8 @@
                   <div class="d-flex justify-content-end mt-3">
                     <button class="btn btn-outline-primary btn-sm" onclick='openServiceLogs(${sidJson},${nameJson})'>查看该服务7天错误日志</button>
                     <button class="btn btn-outline-secondary btn-sm ms-2" onclick='openServiceEventLogs(${sidJson},${nameJson})'>查看该服务7天事件日志</button>
+                    <button class="btn btn-outline-success btn-sm ms-2" onclick='openOpsDoc(${sidJson})'>运维文档</button>
+                    ${currentUser && currentUser.role === "admin" ? `<button class="btn btn-outline-dark btn-sm ms-2" onclick='toggleOpsMode(${sidJson}, ${s.ops_enabled ? "false" : "true"})'>切换运维</button>` : ""}
                   </div>
                 </div>
               </div>
@@ -448,10 +690,22 @@
       await loadAll();
     }
 
+    async function toggleOpsMode(serviceId, opsEnabled) {
+      const sid = String(serviceId || "");
+      await fetchJson("/api/admin/ops_mode", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ service_id: sid, ops_enabled: !!opsEnabled })
+      });
+      await loadAll();
+    }
+
     async function fetchServices() {
       const qs = new URLSearchParams({
+        q: state.q,
         category: state.category,
         on_failure: state.on_failure,
+        status: state.status,
         only_failed: state.only_failed ? "1" : "0",
         page: String(state.page),
         page_size: String(state.page_size)
@@ -666,6 +920,12 @@
         const pages = servicesData.pages || 1;
         document.getElementById("pagePrev").disabled = state.page <= 1;
         document.getElementById("pageNext").disabled = state.page >= pages;
+        const ts = new Date();
+        const hh = String(ts.getHours()).padStart(2, "0");
+        const mm = String(ts.getMinutes()).padStart(2, "0");
+        const ss = String(ts.getSeconds()).padStart(2, "0");
+        const lr = document.getElementById("lastRefresh");
+        if (lr) lr.textContent = `${hh}:${mm}:${ss}`;
       } catch (e) {
         try {
           const msg = String(e && e.message ? e.message : e);
@@ -676,19 +936,55 @@
     }
 
     function bindFilters() {
+      const pageSize = document.getElementById("pageSize");
+      if (pageSize) pageSize.value = String(state.page_size);
+      if (pageSize) pageSize.onchange = async () => {
+        const v = Number(pageSize.value);
+        if (Number.isFinite(v) && v > 0) state.page_size = v;
+        state.page = 1;
+        await loadAll();
+      };
+      const q = document.getElementById("filterQ");
+      if (q) q.value = state.q;
+      if (q) q.onkeydown = async (e) => {
+        if (e.key !== "Enter") return;
+        document.getElementById("applyFilters").click();
+      };
+      let qTimer = null;
+      if (q) q.oninput = async () => {
+        if (qTimer) clearTimeout(qTimer);
+        qTimer = setTimeout(() => {
+          document.getElementById("applyFilters").click();
+        }, 400);
+      };
+      const autoApply = () => document.getElementById("applyFilters").click();
+      const cat = document.getElementById("filterCategory");
+      const failure = document.getElementById("filterFailure");
+      const st = document.getElementById("filterStatus");
+      const onlyFailed = document.getElementById("filterOnlyFailed");
+      if (cat) cat.onchange = autoApply;
+      if (failure) failure.onchange = autoApply;
+      if (st) st.onchange = autoApply;
+      if (onlyFailed) onlyFailed.onchange = autoApply;
       document.getElementById("applyFilters").onclick = async () => {
+        state.q = String(document.getElementById("filterQ").value || "").trim();
         state.category = document.getElementById("filterCategory").value;
         state.on_failure = document.getElementById("filterFailure").value;
+        state.status = document.getElementById("filterStatus").value;
         state.only_failed = document.getElementById("filterOnlyFailed").checked;
         state.page = 1;
         await loadAll();
       };
       document.getElementById("resetFilters").onclick = async () => {
+        document.getElementById("filterQ").value = "";
         document.getElementById("filterCategory").value = "all";
         document.getElementById("filterFailure").value = "all";
+        document.getElementById("filterStatus").value = "all";
         document.getElementById("filterOnlyFailed").checked = false;
+        state.q = "";
         state.category = "all";
         state.on_failure = "all";
+        state.status = "all";
         state.only_failed = false;
         state.page = 1;
         await loadAll();
@@ -707,6 +1003,34 @@
     initResizableColumns("servicesTable", "hbmon_servicesTable_colwidths");
     bindFilters();
     loadAll();
+
+    (function enableDragScroll() {
+      const wrap = document.getElementById("servicesTableWrap");
+      if (!wrap) return;
+      let down = false;
+      let startX = 0;
+      let startScroll = 0;
+      let moved = 0;
+      wrap.addEventListener("mousedown", (e) => {
+        if (e.button !== 0) return;
+        down = true;
+        moved = 0;
+        startX = e.clientX;
+        startScroll = wrap.scrollLeft;
+        state.dragScrolling = false;
+      });
+      window.addEventListener("mousemove", (e) => {
+        if (!down) return;
+        const dx = e.clientX - startX;
+        moved = Math.max(moved, Math.abs(dx));
+        if (moved > 6) state.dragScrolling = true;
+        wrap.scrollLeft = startScroll - dx;
+      });
+      window.addEventListener("mouseup", () => {
+        down = false;
+        setTimeout(() => { state.dragScrolling = false; }, 0);
+      });
+    })();
 
     setInterval(() => {
       const anyModalOpen = !!document.querySelector(".modal.show");
@@ -772,7 +1096,7 @@
                           <div class="card-body p-0">
                             <div class="table-responsive">
                               <table class="table table-sm mb-0 align-middle">
-                                <thead class="table-light"><tr><th>账号</th><th>角色</th><th style="width: 220px;">操作</th></tr></thead>
+                                <thead class="table-light"><tr><th>账号</th><th>角色</th><th style="width: 140px;">运维权限</th><th style="width: 220px;">操作</th></tr></thead>
                                 <tbody id="usersBody"></tbody>
                               </table>
                             </div>
@@ -784,13 +1108,19 @@
                   <div class="tab-pane fade" id="tabBindings" role="tabpanel">
                     <div class="card">
                       <div class="card-header d-flex justify-content-between align-items-center">
-                        <div>服务绑定（填写账号，多个用英文逗号分隔）</div>
-                        <button class="btn btn-outline-secondary btn-sm" id="reloadBindingsBtn">刷新</button>
+                        <div>
+                          服务绑定（填写账号，多个用英文逗号分隔）
+                          <span class="text-muted small ms-2" id="bindingsSaveHint">-</span>
+                        </div>
+                        <div class="d-flex gap-2">
+                          <button class="btn btn-primary btn-sm" id="saveBindingsBtn">保存变更</button>
+                          <button class="btn btn-outline-secondary btn-sm" id="reloadBindingsBtn">刷新</button>
+                        </div>
                       </div>
                       <div class="card-body p-0">
                         <div class="table-responsive">
                           <table class="table table-sm mb-0 align-middle">
-                            <thead class="table-light"><tr><th style="width: 220px;">服务ID</th><th>绑定用户</th><th style="width: 180px;">检测频率</th><th style="width: 140px;">操作</th></tr></thead>
+                            <thead class="table-light"><tr><th style="width: 220px;">服务ID</th><th>绑定用户</th><th style="width: 260px;">检测频率</th></tr></thead>
                             <tbody id="bindingsBody"></tbody>
                           </table>
                         </div>
@@ -812,11 +1142,18 @@
         const username = String(u.username || "");
         const name = escapeHtml(username);
         const role = escapeHtml(u.role || "");
+        const canControl = !!u.can_control;
         const disabled = username === "admin" ? "disabled" : "";
         const usernameJson = JSON.stringify(username);
         return `<tr>
           <td><code>${name}</code></td>
           <td>${role}</td>
+          <td>
+            <div class="form-check form-switch">
+              <input class="form-check-input" type="checkbox" ${canControl ? "checked" : ""} ${disabled} onchange='setUserControl(${usernameJson}, this.checked)'>
+              <label class="form-check-label">允许</label>
+            </div>
+          </td>
           <td>
             <div class="d-flex gap-1">
               <button class="btn btn-outline-primary btn-sm" onclick='resetUserPwd(${usernameJson})' ${disabled}>改密码</button>
@@ -824,7 +1161,7 @@
             </div>
           </td>
         </tr>`;
-      }).join("") || `<tr><td colspan="3" class="text-center text-muted py-3">暂无用户</td></tr>`;
+      }).join("") || `<tr><td colspan="4" class="text-center text-muted py-3">暂无用户</td></tr>`;
     }
 
     async function loadBindings() {
@@ -835,6 +1172,7 @@
       const overrides = schedules.overrides || {};
       const services = data.services || [];
       const body = document.getElementById("bindingsBody");
+      const hint = document.getElementById("bindingsSaveHint");
       body.innerHTML = services.map(sid => {
         const v = (bindings[sid] || []).join(",");
         const sidKey = safeId(sid);
@@ -842,11 +1180,23 @@
         const scheduleValue = String(overrides[sid] || base[sid] || "").trim();
         return `<tr>
           <td><code>${escapeHtml(sid)}</code></td>
-          <td><input class="form-control form-control-sm" value="${escapeHtml(v)}" id="bind_${sidKey}"></td>
-          <td><input class="form-control form-control-sm" value="${escapeHtml(scheduleValue)}" placeholder="30m / 10s / daily@02:30" id="sched_${sidKey}"></td>
-          <td><button class="btn btn-primary btn-sm" onclick='saveBinding(${sidJson})'>保存</button></td>
+          <td>
+            <input class="form-control form-control-sm" value="${escapeHtml(v)}" id="bind_${sidKey}" data-base="${escapeHtml(v)}">
+          </td>
+          <td>
+            <div class="input-group input-group-sm">
+              <span class="input-group-text">频率</span>
+              <input class="form-control" value="${escapeHtml(scheduleValue)}" placeholder="30m / 10s / daily@02:30 / off(关闭自动检测)" id="sched_${sidKey}" data-base="${escapeHtml(scheduleValue)}">
+            </div>
+            <div class="form-check form-switch mt-1">
+              <input class="form-check-input" type="checkbox" ${String(scheduleValue).toLowerCase()==="off" ? "" : "checked"} onchange='toggleAutoCheck(${sidJson}, this.checked)'>
+              <label class="form-check-label">自动检测</label>
+            </div>
+          </td>
         </tr>`;
-      }).join("") || `<tr><td colspan="4" class="text-center text-muted py-3">暂无服务</td></tr>`;
+      }).join("") || `<tr><td colspan="3" class="text-center text-muted py-3">暂无服务</td></tr>`;
+      if (hint) hint.textContent = "修改后自动保存，或点“保存变更”批量保存";
+      initBindingsAutoSave(services);
     }
 
     async function createUser() {
@@ -856,13 +1206,23 @@
       const data = await adminFetch("/api/admin/users", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username, password, role })
+        body: JSON.stringify({ username, password, role, can_control: false })
       });
       alert(data.message || "ok");
       document.getElementById("newUserName").value = "";
       document.getElementById("newUserPwd").value = "";
       await loadUsers();
       await loadBindings();
+    }
+
+    async function setUserControl(username, canControl) {
+      const data = await adminFetch(`/api/admin/users/${encodeURIComponent(username)}/control`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ can_control: !!canControl })
+      });
+      if (data && data.message && data.message !== "ok") alert(data.message);
+      await loadUsers();
     }
 
     async function deleteUser(username) {
@@ -884,26 +1244,234 @@
       alert(data.message || "ok");
     }
 
-    async function saveBinding(serviceId) {
-      const el = document.getElementById(`bind_${safeId(serviceId)}`);
-      const schedEl = document.getElementById(`sched_${safeId(serviceId)}`);
-      const users = String(el.value || "")
+    const bindingsSaveState = { timers: {}, dirty: new Set() };
+
+    function setBindingsHint(text) {
+      const hint = document.getElementById("bindingsSaveHint");
+      if (hint) hint.textContent = String(text || "-");
+    }
+
+    function parseUsers(input) {
+      return String(input || "")
         .split(",")
         .map(x => x.trim())
         .filter(Boolean);
-      const data = await adminFetch("/api/admin/bindings", {
+    }
+
+    function getBindValue(sid) {
+      const el = document.getElementById(`bind_${safeId(sid)}`);
+      return el ? String(el.value || "") : "";
+    }
+
+    function getSchedValue(sid) {
+      const el = document.getElementById(`sched_${safeId(sid)}`);
+      return el ? String(el.value || "").trim() : "";
+    }
+
+    function isRowDirty(sid) {
+      const bindEl = document.getElementById(`bind_${safeId(sid)}`);
+      const schedEl = document.getElementById(`sched_${safeId(sid)}`);
+      const baseBind = bindEl ? String(bindEl.dataset.base || "") : "";
+      const baseSched = schedEl ? String(schedEl.dataset.base || "") : "";
+      const curBind = bindEl ? String(bindEl.value || "") : "";
+      const curSched = schedEl ? String(schedEl.value || "").trim() : "";
+      return (curBind !== baseBind) || (curSched !== baseSched);
+    }
+
+    async function saveOneBindingAndSchedule(sid) {
+      const users = parseUsers(getBindValue(sid));
+      const check_schedule = getSchedValue(sid);
+      await adminFetch("/api/admin/bindings", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ service_id: serviceId, users })
+        body: JSON.stringify({ service_id: sid, users })
       });
-      const check_schedule = String(schedEl ? schedEl.value : "").trim();
       await adminFetch("/api/admin/schedules", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ service_id: serviceId, check_schedule })
+        body: JSON.stringify({ service_id: sid, check_schedule })
       });
-      alert(data.message || "ok");
+      const bindEl = document.getElementById(`bind_${safeId(sid)}`);
+      const schedEl = document.getElementById(`sched_${safeId(sid)}`);
+      if (bindEl) bindEl.dataset.base = String(bindEl.value || "");
+      if (schedEl) schedEl.dataset.base = String(schedEl.value || "").trim();
+      bindingsSaveState.dirty.delete(String(sid));
+    }
+
+    function scheduleAutoSave(sid) {
+      sid = String(sid || "");
+      if (!sid) return;
+      bindingsSaveState.dirty.add(sid);
+      setBindingsHint(`有 ${bindingsSaveState.dirty.size} 个服务待保存`);
+      if (bindingsSaveState.timers[sid]) clearTimeout(bindingsSaveState.timers[sid]);
+      bindingsSaveState.timers[sid] = setTimeout(async () => {
+        if (!isRowDirty(sid)) {
+          bindingsSaveState.dirty.delete(sid);
+          setBindingsHint(bindingsSaveState.dirty.size ? `有 ${bindingsSaveState.dirty.size} 个服务待保存` : "已保存");
+          return;
+        }
+        try {
+          await saveOneBindingAndSchedule(sid);
+          await loadAll();
+          setBindingsHint(bindingsSaveState.dirty.size ? `有 ${bindingsSaveState.dirty.size} 个服务待保存` : "已保存");
+        } catch (e) {
+          setBindingsHint(`保存失败：${String(e && e.message ? e.message : e)}`);
+        }
+      }, 800);
+    }
+
+    function initBindingsAutoSave(services) {
+      (services || []).forEach(sid => {
+        const bindEl = document.getElementById(`bind_${safeId(sid)}`);
+        const schedEl = document.getElementById(`sched_${safeId(sid)}`);
+        if (bindEl) {
+          bindEl.oninput = () => scheduleAutoSave(sid);
+          bindEl.onblur = () => scheduleAutoSave(sid);
+          bindEl.onkeydown = (e) => { if (e && e.key === "Enter") scheduleAutoSave(sid); };
+        }
+        if (schedEl) {
+          schedEl.oninput = () => scheduleAutoSave(sid);
+          schedEl.onblur = () => scheduleAutoSave(sid);
+          schedEl.onkeydown = (e) => { if (e && e.key === "Enter") scheduleAutoSave(sid); };
+        }
+      });
+    }
+
+    async function saveAllBindingsChanges() {
+      const services = Array.from(document.querySelectorAll("#bindingsBody tr td:first-child code")).map(x => String(x.textContent || "").trim()).filter(Boolean);
+      const dirty = services.filter(sid => isRowDirty(sid));
+      if (!dirty.length) {
+        setBindingsHint("没有变更");
+        return;
+      }
+      setBindingsHint(`保存中（${dirty.length}）...`);
+      try {
+        for (const sid of dirty) {
+          await saveOneBindingAndSchedule(sid);
+        }
+        await loadAll();
+        setBindingsHint("已保存");
+      } catch (e) {
+        setBindingsHint(`保存失败：${String(e && e.message ? e.message : e)}`);
+      }
+    }
+
+    function autoKey(serviceId) {
+      return `auto_sched_prev:${String(serviceId || "")}`;
+    }
+
+    async function toggleAutoCheck(serviceId, enabled) {
+      const sid = String(serviceId || "");
+      const schedEl = document.getElementById(`sched_${safeId(sid)}`);
+      const current = String(schedEl ? schedEl.value : "").trim();
+      if (!enabled) {
+        try { localStorage.setItem(autoKey(sid), current && current.toLowerCase() !== "off" ? current : ""); } catch {}
+        if (schedEl) schedEl.value = "off";
+      } else {
+        let prev = "";
+        try { prev = String(localStorage.getItem(autoKey(sid)) || "").trim(); } catch {}
+        if (schedEl) schedEl.value = prev || "";
+      }
+      await adminFetch("/api/admin/schedules", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ service_id: sid, check_schedule: String(schedEl ? schedEl.value : "").trim() })
+      });
       await loadAll();
+      await loadBindings();
+    }
+
+    async function toggleAutoCheckRow(serviceId, enabled) {
+      const sid = String(serviceId || "");
+      const svc = serviceIndex[sid] || {};
+      const current = String((svc.check_schedule || "")).trim();
+      if (!enabled) {
+        try { localStorage.setItem(autoKey(sid), current && current.toLowerCase() !== "off" ? current : ""); } catch {}
+        await adminFetch("/api/admin/schedules", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ service_id: sid, check_schedule: "off" })
+        });
+      } else {
+        let prev = "";
+        try { prev = String(localStorage.getItem(autoKey(sid)) || "").trim(); } catch {}
+        await adminFetch("/api/admin/schedules", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ service_id: sid, check_schedule: prev || "" })
+        });
+      }
+      await loadAll();
+    }
+
+    const scheduleState = { service_id: "" };
+
+    function ensureScheduleModal() {
+      if (document.getElementById("scheduleModal")) return;
+      const root = document.getElementById("overlayModalsRoot");
+      root.insertAdjacentHTML("beforeend", `
+        <div class="modal fade" id="scheduleModal" tabindex="-1" aria-hidden="true">
+          <div class="modal-dialog">
+            <div class="modal-content">
+              <div class="modal-header">
+                <h5 class="modal-title">自动检测与频率</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+              </div>
+              <div class="modal-body">
+                <div class="mb-2 text-muted small">服务：<code id="scheduleModalSid">-</code></div>
+                <div class="form-check form-switch mb-3">
+                  <input class="form-check-input" type="checkbox" id="scheduleModalAuto">
+                  <label class="form-check-label" for="scheduleModalAuto">自动检测</label>
+                </div>
+                <label class="form-label mb-1">检测频率</label>
+                <input class="form-control" id="scheduleModalValue" placeholder="30m / 10s / daily@02:30 / off">
+                <div class="text-muted small mt-2">留空表示使用默认频率；填 <code>off</code> 表示关闭自动检测。</div>
+                <div class="text-muted small mt-1" id="scheduleModalBase"></div>
+              </div>
+              <div class="modal-footer">
+                <button class="btn btn-primary" id="scheduleModalSaveBtn">保存</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      `);
+      document.getElementById("scheduleModalSaveBtn").onclick = saveScheduleModal;
+    }
+
+    function openScheduleModal(serviceId) {
+      const sid = String(serviceId || "");
+      scheduleState.service_id = sid;
+      ensureScheduleModal();
+      const svc = serviceIndex[sid] || {};
+      const auto = !!svc.auto_check;
+      const base = String(svc.base_check_schedule || "").trim();
+      const cur = String(svc.check_schedule || "").trim();
+      document.getElementById("scheduleModalSid").textContent = sid;
+      document.getElementById("scheduleModalAuto").checked = auto;
+      document.getElementById("scheduleModalValue").value = auto ? (cur || base || "") : "off";
+      document.getElementById("scheduleModalBase").textContent = base ? `默认频率：${base}` : "";
+      const modal = bootstrap.Modal.getOrCreateInstance(document.getElementById("scheduleModal"));
+      modal.show();
+    }
+
+    async function saveScheduleModal() {
+      const sid = String(scheduleState.service_id || "");
+      if (!sid) return;
+      const auto = !!document.getElementById("scheduleModalAuto").checked;
+      let v = String(document.getElementById("scheduleModalValue").value || "").trim();
+      if (!auto) v = "off";
+      try {
+        await adminFetch("/api/admin/schedules", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ service_id: sid, check_schedule: v })
+        });
+        await loadAll();
+        const modal = bootstrap.Modal.getOrCreateInstance(document.getElementById("scheduleModal"));
+        modal.hide();
+      } catch (e) {
+        alert(String(e && e.message ? e.message : e));
+      }
     }
 
     if (currentUser && currentUser.role === "admin") {
@@ -914,6 +1482,7 @@
           document.getElementById("createUserBtn").onclick = createUser;
           document.getElementById("reloadUsersBtn").onclick = loadUsers;
           document.getElementById("reloadBindingsBtn").onclick = loadBindings;
+          document.getElementById("saveBindingsBtn").onclick = saveAllBindingsChanges;
           await loadUsers();
           await loadBindings();
           const modal = new bootstrap.Modal(document.getElementById("adminModal"));

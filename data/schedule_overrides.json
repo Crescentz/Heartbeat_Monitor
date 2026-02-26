@@ -1,6 +1,8 @@
 {
   "overrides": {
-    "local_restart_demo": "10s",
-    "local_test_01": "120s"
+    "local_restart_demo": "30s",
+    "local_test_01": "120s",
+    "mineru_01": "1m",
+    "local_alert_demo": "30s"
   }
 }

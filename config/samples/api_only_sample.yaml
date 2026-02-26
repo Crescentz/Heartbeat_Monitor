@@ -1,0 +1,30 @@
+enabled: false
+id: "api_only_sample"
+name: "HTTP API 监控样例（仅监控）"
+description: |
+  适用：只能 HTTP 调用接口（curl/python 能通），但无法 SSH 登录目标机的服务。
+  复制到 config/services/ 后按需修改并改为 enabled: true。
+category: "api"
+auto_check: true
+check_schedule: "1m"
+on_failure: "alert"
+host: "192.168.1.120"
+
+# 仅监控：不配置任何 start/stop/restart_cmd(s)
+test_api: "http://192.168.1.120:9000/health"
+test_method: "GET"
+
+# dict 表示校验 JSON 字段
+expected_response:
+  ok: true
+timeout_s: 10
+max_elapsed_ms: null
+
+ops_doc:
+  monitor: "API 可用性：访问 /health，要求 HTTP 2xx 且 JSON 字段匹配。"
+  troubleshooting:
+    - "确认接口在监控机上可访问（内网防火墙/DNS/代理）"
+    - "确认服务侧健康检查实现是否稳定（避免动态字段导致误判）"
+  contacts: []
+  api_doc: ""
+  notes: ""

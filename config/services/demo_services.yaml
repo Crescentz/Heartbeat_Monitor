@@ -1,0 +1,100 @@
+services:
+  - enabled: true
+    id: "local_restart_demo"
+    name: "本机失败重启样例服务"
+    description: "示例：本机服务（18081）。可在页面点“启动”后启动本机示例 API"
+    category: "api"
+    auto_check: true
+    check_schedule: "10s"
+    on_failure: "restart"
+    auto_fix: true
+    plugin: "localproc"
+    ops_default_enabled: true
+
+    host: "127.0.0.1"
+    test_api: "http://127.0.0.1:18081/health"
+    expected_response:
+      ok: true
+    timeout_s: 2
+    max_elapsed_ms: null
+
+    local_cwd: ""
+    local_script: "local_restart_api.py"
+    local_args: []
+
+    ops_doc:
+      monitor: "本机健康检查：访问 /health，JSON ok=true 则认为正常。"
+      start_steps:
+        - "页面点“启动”：本机启动 local_restart_api.py（127.0.0.1:18081）"
+      stop_steps:
+        - "页面点“停止”：结束本机子进程"
+      restart_steps:
+        - "页面点“重启”：stop + start"
+      troubleshooting:
+        - "如果启动失败，确认 18081 端口是否被占用"
+      contacts: []
+      api_doc: ""
+      notes: ""
+
+  - enabled: true
+    id: "local_alert_demo"
+    name: "本机仅提示样例服务"
+    description: "示例：本机服务（18080）。失败策略=仅提示，不自动重启"
+    category: "api"
+    auto_check: true
+    check_schedule: "10s"
+    on_failure: "alert"
+    plugin: ""
+
+    host: "127.0.0.1"
+    test_api: "http://127.0.0.1:18080/health"
+    expected_response:
+      ok: true
+    timeout_s: 2
+    max_elapsed_ms: null
+
+    ops_doc:
+      monitor: "本机健康检查：访问 /health，JSON ok=true 则认为正常。"
+      start_steps:
+        - "该样例为“仅提示+只监控”：不提供启停/重启按钮；如需验证告警，请手工运行 local_test_service.py"
+      troubleshooting:
+        - "确认本机已运行 local_test_service.py（127.0.0.1:18080）"
+      contacts: []
+      api_doc: ""
+      notes: ""
+
+  - enabled: true
+    id: "mineru_01"
+    name: "Mineru OCR"
+    description: "示例：文件上传类健康检查（需要你填好 host/test_api/SSH 后再启用定时）"
+    category: "api"
+    auto_check: false
+    check_schedule: "1m"
+    on_failure: "alert"
+    plugin: "mineru"
+
+    host: "192.168.1.100"
+    ssh_port: 22
+    ssh_user: ""
+    ssh_password: ""
+    sudo_password: ""
+    sudo: true
+
+    test_api: "http://192.168.1.100:8000/file_parse"
+    test_file: "data/test.pdf"
+    file_field: "files"
+    file_field_as_list: true
+    expected_response: null
+    timeout_s: 60
+    max_elapsed_ms: null
+
+    restart_cmds: []
+
+    ops_doc:
+      monitor: "健康检查=调用 /file_parse 上传 data/test.pdf；可在 expected_response 配置业务正确性断言。"
+      troubleshooting:
+        - "先确保监控机能访问 test_api（网络/DNS/防火墙）"
+        - "如需自动重启，请补齐 SSH 与 restart_cmds 或使用 @script:"
+      contacts: []
+      api_doc: ""
+      notes: ""

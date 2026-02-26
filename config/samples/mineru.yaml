@@ -1,0 +1,66 @@
+enabled: false
+id: "mineru_01"
+name: "Mineru OCR"
+description: "Mineru PDF OCR 转换服务（GPU）"
+category: "api"
+auto_check: true
+on_failure: "restart"
+plugin: "mineru"
+host: "192.168.1.100"
+ssh_port: 22
+ssh_user: "ubuntu"
+ssh_password: "REPLACE_ME"
+ssh_private_key: ""  # 可选：OpenSSH私钥文本（和 ssh_password 二选一）
+ssh_private_key_path: ""  # 可选：私钥文件路径（和 ssh_password 二选一）
+ssh_private_key_passphrase: ""  # 可选：私钥口令
+sudo_password: "REPLACE_ME"
+sudo: true
+service_type: "docker"
+container_name: "mineru_container"
+test_api: "http://192.168.1.100:8000/file_parse"
+test_file: "data/test.pdf"
+file_field: "files"
+file_field_as_list: true
+expected_response: null
+timeout_s: 60
+max_elapsed_ms: null
+file_extra_form:
+  lang_list: ["ch"]
+  backend: "vlm-vllm-async-engine"
+  parse_method: "ocr"
+  formula_enable: false
+  table_enable: false
+  server_url: null
+  return_md: true
+  return_middle_json: true
+  return_model_output: false
+  return_content_list: true
+  return_images: false
+  response_format_zip: false
+restart_cmds:
+  - "sudo docker rm -f mineru_container || true"
+  - "sudo docker run --gpus all --shm-size 32g -p 30000:30000 -p 7860:7860 -p 8000:8000 --ipc=host -itd --name mineru_container -e MINERU_MODEL_SOURCE=local mineru:latest /bin/bash"
+  - "sudo docker exec -d mineru_container bash -c \"nohup mineru-api --host 0.0.0.0 --port 8000 > /vllm-workspace/api.log 2>&1 &\""
+ops_doc:
+  monitor: "健康检查=调用 /file_parse 上传 data/test.pdf，能成功返回则认为服务正常。"
+  restart_steps:
+    - "sudo docker rm -f mineru_container || true"
+    - "sudo docker run --gpus all --shm-size 32g -p 30000:30000 -p 7860:7860 -p 8000:8000 --ipc=host -itd --name mineru_container -e MINERU_MODEL_SOURCE=local mineru:latest /bin/bash"
+    - "sudo docker exec -d mineru_container bash -c \"nohup mineru-api --host 0.0.0.0 --port 8000 > /vllm-workspace/api.log 2>&1 &\""
+  troubleshooting:
+    - "重点看容器日志：sudo docker logs --tail 200 mineru_container"
+    - "确认端口：sudo docker ps --format \"table {{.Names}}\\t{{.Ports}}\" | findstr mineru_container"
+  api_doc: |
+    POST /file_parse
+    Content-Type: multipart/form-data
+
+    字段：
+    - files: array[binary]（上传 pdf 或 image 文件）
+    - output_dir: string，默认 ./output
+    - lang_list: array[string]，默认 ["ch"]
+    - backend: string，默认 pipeline
+    - parse_method: string，默认 auto
+    - formula_enable/table_enable: boolean
+    - return_md/return_middle_json/return_content_list 等：boolean
+
+    监控程序默认用 data/test.pdf 做健康检查。

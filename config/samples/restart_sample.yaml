@@ -1,0 +1,33 @@
+enabled: false
+id: "sample_restart"
+name: "失败重启样例（远端 SSH 执行）"
+description: |
+  示例：检测失败时自动执行重启命令（on_failure=restart）。
+  复制到 config/services/ 后按需修改并改为 enabled: true。
+  复杂命令建议改用 restart_cmds 或 @script:ops_scripts/<service_id>/restart.sh。
+category: "other"
+auto_check: true
+check_schedule: "1m"
+on_failure: "restart"
+auto_fix: true
+host: "127.0.0.1"
+ssh_port: 22
+ssh_user: "your_user"
+ssh_password: "your_password"
+sudo: true
+test_api: "http://127.0.0.1:9999/health"
+timeout_s: 10
+expected_response: "ok"
+restart_cmds:
+  - "systemctl restart your-service"
+ops_doc:
+  monitor: "健康检查：访问 test_api；expected_response 为字符串时表示响应文本包含该子串。"
+  restart_steps:
+    - "systemctl restart your-service"
+  troubleshooting:
+    - "先确认服务是否在目标机上运行：systemctl status your-service"
+    - "查看日志：journalctl -u your-service -n 200 --no-pager"
+  contacts: []
+  api_doc: ""
+  notes: ""
+

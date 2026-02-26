@@ -12,6 +12,7 @@ from werkzeug.security import check_password_hash, generate_password_hash
 class User:
     username: str
     role: str
+    can_control: bool = False
 
 
 def _users_path() -> Path:
@@ -48,6 +49,7 @@ def ensure_default_admin() -> bool:
             "username": "admin",
             "password_hash": generate_password_hash("admin"),
             "role": "admin",
+            "can_control": True,
         }
     )
     data["users"] = users
@@ -66,8 +68,9 @@ def list_users() -> List[User]:
             continue
         username = str(u.get("username") or "").strip()
         role = str(u.get("role") or "user").strip() or "user"
+        can_control = bool(u.get("can_control")) if role != "admin" else True
         if username:
-            out.append(User(username=username, role=role))
+            out.append(User(username=username, role=role, can_control=can_control))
     out.sort(key=lambda x: x.username)
     return out
 
@@ -99,12 +102,13 @@ def verify_login(username: str, password: str) -> Optional[User]:
             return None
         if check_password_hash(ph, password):
             role = str(u.get("role") or "user").strip() or "user"
-            return User(username=username, role=role)
+            can_control = bool(u.get("can_control")) if role != "admin" else True
+            return User(username=username, role=role, can_control=can_control)
         return None
     return None
 
 
-def create_user(username: str, password: str, role: str = "user") -> Tuple[bool, str]:
+def create_user(username: str, password: str, role: str = "user", can_control: Optional[bool] = None) -> Tuple[bool, str]:
     username = str(username or "").strip()
     if not username:
         return False, "missing_username"
@@ -117,6 +121,10 @@ def create_user(username: str, password: str, role: str = "user") -> Tuple[bool,
     role = str(role or "user").strip() or "user"
     if role not in ("user", "admin"):
         role = "user"
+    if role == "admin":
+        can_control = True
+    if can_control is None:
+        can_control = False
 
     path = _users_path()
     data = _read_json(path)
@@ -125,7 +133,45 @@ def create_user(username: str, password: str, role: str = "user") -> Tuple[bool,
         users = []
     if any(isinstance(u, dict) and str(u.get("username") or "") == username for u in users):
         return False, "user_exists"
-    users.append({"username": username, "password_hash": generate_password_hash(password), "role": role})
+    users.append(
+        {
+            "username": username,
+            "password_hash": generate_password_hash(password),
+            "role": role,
+            "can_control": bool(can_control),
+        }
+    )
+    data["users"] = users
+    _write_json_atomic(path, data)
+    return True, "ok"
+
+
+def set_can_control(username: str, can_control: bool) -> Tuple[bool, str]:
+    username = str(username or "").strip()
+    if not username:
+        return False, "missing_username"
+    if username == "admin":
+        return False, "cannot_change_admin"
+    path = _users_path()
+    data = _read_json(path)
+    users = data.get("users")
+    if not isinstance(users, list):
+        users = []
+    found = False
+    for u in users:
+        if not isinstance(u, dict):
+            continue
+        if str(u.get("username") or "") != username:
+            continue
+        role = str(u.get("role") or "user").strip() or "user"
+        if role == "admin":
+            u["can_control"] = True
+        else:
+            u["can_control"] = bool(can_control)
+        found = True
+        break
+    if not found:
+        return False, "user_not_found"
     data["users"] = users
     _write_json_atomic(path, data)
     return True, "ok"

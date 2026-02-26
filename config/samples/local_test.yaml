@@ -1,0 +1,17 @@
+enabled: false
+id: "local_test_01"
+name: "本机测试服务（仅监控）"
+description: |
+  用于验证监控程序能否正常运行（本机 127.0.0.1:18080）。
+  复制到 config/services/ 后按需修改并改为 enabled: true。
+category: "api"
+auto_check: true
+check_schedule: "10s"
+on_failure: "alert"
+
+host: "127.0.0.1"
+test_api: "http://127.0.0.1:18080/health"
+expected_response:
+  ok: true
+timeout_s: 3
+max_elapsed_ms: null

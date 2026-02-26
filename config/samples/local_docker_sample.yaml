@@ -1,0 +1,43 @@
+enabled: false
+id: "local_docker_sample"
+name: "本机 Docker 服务样例（无需 SSH）"
+description: |
+  适用：服务运行在监控机本机，但运维方式是 docker/systemctl/java -jar 等本机命令，而不是本项目内的 Python 脚本。
+  这里用 docker 作为演示：start/stop/restart_cmd(s) 会在监控机本机执行。
+  复制到 config/services/ 后按需修改并改为 enabled: true。
+category: "api"
+auto_check: true
+check_schedule: "1m"
+on_failure: "alert"
+plugin: "localproc"
+
+host: "127.0.0.1"
+test_api: "http://127.0.0.1:18090/health"
+expected_response:
+  ok: true
+timeout_s: 5
+max_elapsed_ms: null
+
+start_cmds:
+  - "@ignore:docker rm -f local_docker_sample"
+  - "docker run -d --name local_docker_sample -p 18090:18090 your-image:latest"
+stop_cmds:
+  - "@ignore:docker rm -f local_docker_sample"
+restart_cmds:
+  - "@ignore:docker rm -f local_docker_sample"
+  - "docker run -d --name local_docker_sample -p 18090:18090 your-image:latest"
+
+ops_doc:
+  monitor: "本机健康检查：访问 http://127.0.0.1:18090/health，JSON ok=true 则认为正常。"
+  start_steps:
+    - "页面点“启动”（本机执行 start_cmds，无需 SSH）"
+  stop_steps:
+    - "页面点“停止”（本机执行 stop_cmds，无需 SSH）"
+  restart_steps:
+    - "页面点“重启”（本机执行 restart_cmds，无需 SSH）"
+  troubleshooting:
+    - "确认 docker 可用：docker ps"
+    - "看容器日志：docker logs --tail 200 local_docker_sample"
+  contacts: []
+  api_doc: ""
+  notes: ""

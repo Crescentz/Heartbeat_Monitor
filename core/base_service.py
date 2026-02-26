@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from datetime import datetime
 import threading
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 class BaseService(ABC):
     def __init__(self, service_id, name, description, config, config_path: Optional[str] = None):
@@ -47,18 +47,29 @@ class BaseService(ABC):
         if self.total_checks > 0:
             failure_rate = round((self.failure_count / self.total_checks) * 100, 2)
 
-        start_cmds = self.config.get("start_cmds") if isinstance(self.config, dict) else None
-        stop_cmds = self.config.get("stop_cmds") if isinstance(self.config, dict) else None
-        restart_cmds = self.config.get("restart_cmds") if isinstance(self.config, dict) else None
-        has_start = bool(self.config.get("start_cmd") or (isinstance(start_cmds, list) and len(start_cmds) > 0))
-        has_stop = bool(self.config.get("stop_cmd") or (isinstance(stop_cmds, list) and len(stop_cmds) > 0))
-        has_restart = bool(self.config.get("restart_cmd") or (isinstance(restart_cmds, list) and len(restart_cmds) > 0))
+        config = self.config if isinstance(self.config, dict) else {}
+        start_cmds = config.get("start_cmds")
+        stop_cmds = config.get("stop_cmds")
+        restart_cmds = config.get("restart_cmds")
+        has_start = bool(config.get("start_cmd") or (isinstance(start_cmds, list) and len(start_cmds) > 0))
+        has_stop = bool(config.get("stop_cmd") or (isinstance(stop_cmds, list) and len(stop_cmds) > 0))
+        has_restart = bool(config.get("restart_cmd") or (isinstance(restart_cmds, list) and len(restart_cmds) > 0))
+        ops_capable = has_start or has_stop or has_restart
 
-        category = str(self.config.get("category") or self.config.get("service_type") or "api").lower()
-        auto_check = bool(self.config.get("auto_check", True))
-        on_failure = str(self.config.get("on_failure") or "alert").lower()
-        check_schedule = str(self.config.get("check_schedule") or "").strip()
-        disabled = bool(self.config.get("_disabled", False))
+        category = str(config.get("category") or config.get("service_type") or "api").lower()
+        auto_check = bool(config.get("auto_check", True))
+        on_failure = str(config.get("on_failure") or "alert").lower()
+        check_schedule = str(config.get("check_schedule") or "").strip()
+        base_check_schedule = str(config.get("_base_check_schedule") or "").strip()
+        disabled = bool(config.get("_disabled", False))
+        ops_enabled = bool(config.get("_ops_enabled", False))
+        ops_doc = config.get("ops_doc")
+
+        def _collect_cmds(single_key: str, multi_key: str) -> List[str]:
+            if isinstance(config.get(multi_key), list):
+                return [str(x) for x in config.get(multi_key) if str(x).strip()]
+            v = str(config.get(single_key) or "").strip()
+            return [v] if v else []
 
         return {
             "id": self.service_id,
@@ -73,16 +84,24 @@ class BaseService(ABC):
             "auto_check": auto_check,
             "on_failure": on_failure,
             "check_schedule": check_schedule,
+            "base_check_schedule": base_check_schedule,
             "disabled": disabled,
-            "can_start": has_start and (not disabled),
-            "can_stop": has_stop and (not disabled),
-            "can_restart": has_restart and (not disabled),
-            "host": self.config.get("host") or self.config.get("ip") or "N/A",
-            "test_api": self.config.get("test_api") or "",
+            "ops_enabled": ops_enabled,
+            "ops_capable": ops_capable,
+            "can_start": has_start and (not disabled) and ops_enabled,
+            "can_stop": has_stop and (not disabled) and ops_enabled,
+            "can_restart": has_restart and (not disabled) and ops_enabled,
+            "host": config.get("host") or config.get("ip") or "N/A",
+            "test_api": config.get("test_api") or "",
             "config_path": self.config_path or "",
             "last_test_detail": self.last_test_detail,
+            "ops_doc": ops_doc,
+            "start_cmds": _collect_cmds("start_cmd", "start_cmds"),
+            "stop_cmds": _collect_cmds("stop_cmd", "stop_cmds"),
+            "restart_cmds": _collect_cmds("restart_cmd", "restart_cmds"),
         }
 
+    # ===== 扩展点@服务接口：新增服务必须实现以下 3 个操作与健康检测 =====
     @abstractmethod
     def check_health(self):
         """
@@ -90,14 +109,17 @@ class BaseService(ABC):
         """
         pass
 
+    # ===== 扩展点@服务接口 =====
     @abstractmethod
     def start_service(self):
         pass
 
+    # ===== 扩展点@服务接口 =====
     @abstractmethod
     def stop_service(self):
         pass
     
+    # ===== 扩展点@服务接口 =====
     @abstractmethod
     def restart_service(self):
         pass

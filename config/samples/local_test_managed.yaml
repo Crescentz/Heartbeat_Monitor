@@ -1,0 +1,37 @@
+enabled: false
+id: "local_test_managed"
+name: "本机测试服务（可启停）"
+description: |
+  由监控程序本机启动/停止/重启 local_test_service.py（18080）。
+  启用前请不要手动运行该脚本，避免端口冲突。
+  复制到 config/services/ 后按需修改并改为 enabled: true。
+category: "api"
+auto_check: true
+check_schedule: "10s"
+on_failure: "alert"
+plugin: "localproc"
+
+host: "127.0.0.1"
+test_api: "http://127.0.0.1:18080/health"
+expected_response:
+  ok: true
+timeout_s: 2
+max_elapsed_ms: null
+
+local_cwd: ""
+local_script: "local_test_service.py"
+local_args: []
+ops_doc:
+  monitor: "本机健康检查：访问 http://127.0.0.1:18080/health，JSON ok=true 则认为正常。"
+  start_steps:
+    - "页面点“启动”（本机子进程方式，无需 SSH 账号/密码）"
+  stop_steps:
+    - "页面点“停止”（结束本机子进程）"
+  restart_steps:
+    - "页面点“重启”（相当于 stop + start）"
+  troubleshooting:
+    - "确认端口是否被占用：本机 18080"
+    - "看 data/logs/monitor.log 里的 localproc 相关日志"
+  contacts: []
+  api_doc: ""
+  notes: ""

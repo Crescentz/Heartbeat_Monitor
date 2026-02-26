@@ -1,5 +1,6 @@
 import logging
 import sys
+import threading
 
 def _setup_logging() -> None:
     fmt = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
@@ -40,6 +41,7 @@ if __name__ == '__main__':
 
     from core.check_schedule import job_id_for_service, parse_check_schedule
     from core.disabled_service_store import get_disabled_map
+    from core.ops_mode_store import get_ops_enabled_map, seed_ops_enabled, set_ops_enabled
     from core.schedule_override_store import get_overrides
     from core.monitor_engine import MonitorEngine
     from core.service_loader import load_services_from_dir
@@ -53,12 +55,25 @@ if __name__ == '__main__':
     scheduler = BackgroundScheduler()
     overrides = get_overrides()
     disabled_map = get_disabled_map()
+    seed_ops_enabled(sorted(list(engine.services.keys())), default_enabled=True)
+    ops_enabled_map = get_ops_enabled_map()
     for service_id, svc in engine.services.items():
         if isinstance(getattr(svc, "config", None), dict) and "_base_check_schedule" not in svc.config:
             svc.config["_base_check_schedule"] = str(svc.config.get("check_schedule") or "").strip()
         if isinstance(getattr(svc, "config", None), dict) and disabled_map.get(str(service_id)):
             svc.config["_disabled"] = True
+        if isinstance(getattr(svc, "config", None), dict):
+            sid = str(service_id)
+            if sid not in ops_enabled_map and bool(svc.config.get("ops_default_enabled", False)):
+                set_ops_enabled(sid, True)
+                ops_enabled_map[sid] = True
+            svc.config["_ops_enabled"] = bool(ops_enabled_map.get(sid, False))
         if bool(getattr(svc, "config", {}).get("_disabled", False)):
+            continue
+        schedule_value = str(overrides.get(str(service_id)) or "").strip()
+        if schedule_value.lower() in ("off", "pause", "paused", "disabled", "disable"):
+            if isinstance(getattr(svc, "config", None), dict):
+                svc.config["auto_check"] = False
             continue
         if not bool(getattr(svc, "config", {}).get("auto_check", True)):
             continue
@@ -78,9 +93,8 @@ if __name__ == '__main__':
     scheduler.start()
     log.info("Scheduler started: per-service jobs=%s", len(scheduler.get_jobs()))
 
-    engine.check_all()
-
     engine.scheduler = scheduler
     app = create_app(engine, scheduler=scheduler)
-    log.info("Web UI: http://127.0.0.1:5000/")
-    app.run(host="0.0.0.0", port=5000, debug=True, use_reloader=False)
+    log.info("Web UI: http://127.0.0.1:60005/")
+    threading.Thread(target=engine.check_all, daemon=True).start()
+    app.run(host="0.0.0.0", port=60005, debug=True, use_reloader=False)

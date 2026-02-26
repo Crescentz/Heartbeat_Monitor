@@ -1,35 +1,127 @@
-enabled: true
+enabled: false
 id: "service_id"
 name: "服务名"
 description: "服务功能描述"
-host: "被监控服务器IP"
-ssh_port: 22
-ssh_user: "ssh用户名"
-ssh_password: "ssh密码"
-ssh_private_key: ""  # OpenSSH 私钥文本（可选，和 ssh_password 二选一）
-ssh_private_key_path: ""  # 私钥文件路径（可选，和 ssh_password 二选一）
-ssh_private_key_passphrase: ""  # 私钥口令（可选）
-ssh_command_wrapper: ""  # 可选，例如：bash -lc（用于 conda activate / source 环境等）
-sudo_password: "sudo密码(可选)"
-service_type: "docker"
+host: "被监控服务器IP或域名"
+
+# 目标：一个 YAML 覆盖“多台服务器 / 多种服务 / 多种运维方式”。
+# 你可以按需填写；用不到的字段留空即可。
+#
+# 最简可用（仅监控）：
+# - enabled / id / name / category / host
+# - test_api / expected_response / timeout_s / check_schedule
+#
+# 重要原则：
+# - test_api 必须能从“监控机”访问到（和服务是否同机无关）
+# - 只有当你需要启停/重启时，才配置运维字段（cmd 或 SSH 或 localproc）
+
+# ===== 1) 分类与检测（适用于所有服务）=====
 category: "api"  # 可选: api/web/other，用于界面分类展示
-auto_check: true  # 是否参与定时检测
-check_schedule: "30m"
-on_failure: "alert"  # alert=仅提示；restart=失败后自动重启（需要配置 restart_cmds）
-auto_fix: true  # on_failure=restart 时是否执行自动处理
-plugin: ""  # 可选: mineru / 其它自定义插件名；为空则使用通用HTTP检测
+auto_check: true
+check_schedule: "30m"  # 10s/5m/1h/daily@02:30/weekly@mon 03:00；也可在管理界面填 off 关闭自动检测
+on_failure: "alert"  # alert=仅提示；restart=失败后自动重启（需要运维方式可用）
+auto_fix: true
+
+plugin: ""  # 留空=GenericService；localproc=本机运维；mineru=插件示例
+
 test_api: "http://host:端口/接口路径"
 test_method: "GET"  # GET/POST
-test_payload: {}
-test_file: ""  # 需要上传文件检测时填写，例如 data/test.pdf
+test_payload: null  # POST JSON 请求体（可选；不需要就保持 null）
+
+# 需要“数据交互验证/文件上传验证”时使用（可选）
+test_file: ""  # 例如 data/test.pdf
 file_field: "file"
-expected_response: {}  # 支持 dict 或 string；为空表示仅校验 2xx
+
+# expected_response：
+# - null：仅判断 HTTP 2xx
+# - string：响应文本包含该子串
+# - dict：响应 JSON 字段匹配（用于“返回字典内容判断”）
+# - list：多个候选条件（任意一个满足即通过）
+#
+# 下面给出常见写法模板（按需挑一种）：
+#
+# A) 只看 HTTP 成功（页面/接口最简监控）
+# expected_response: null
+#
+# B) 页面/文本包含关键字（网页可用性、错误页识别等）
+# expected_response: "登录"
+#
+# C) JSON 字段精确匹配（最常用；适合 /health 这类固定字段）
+# expected_response:
+#   ok: true
+#
+# D) JSON 多种可能值（兼容不同版本/不同环境返回）
+# expected_response:
+#   - { ok: true }
+#   - { status: "UP" }
+#
+# E) 规则断言（适合“HTTP 200 但业务失败”的场景；可逐条定位失败原因）
+# expected_response:
+#   __type: "json"
+#   __rules:
+#     - { path: "code", op: "==", value: 0 }
+#     - { path: "msg", op: "!=", value: "error" }
+#     - { path: "data.text", op: "len_gt", value: 10 }   # OCR/抽取结果非空
+#     - { path: "$text", op: "contains", value: "ok" }    # 用响应原文做兜底判断
+expected_response: null
 timeout_s: 30
-sudo: true
-start_cmd: ""
+max_elapsed_ms: null  # 可选：慢响应阈值（毫秒）；超过则判定失败，便于区分“可达但很慢”
+
+# ===== 2) 运维方式（按需选择其一，留空则=只监控）=====
+#
+# 2.1 仅监控（无运维能力）
+# - 不填写任何 start/stop/restart_cmds，也不填写 local_script
+# - 页面会自动禁用“启动/停止/重启”
 start_cmds: []
-stop_cmd: ""
 stop_cmds: []
-restart_cmd: ""
 restart_cmds: []
+
+# 2.2 远端运维（SSH 在“其他服务器”执行命令）
+# - 填 ssh_*；命令在目标机执行
+ssh_port: 22
+ssh_user: ""
+ssh_password: ""
+ssh_private_key: ""  # 可选：与 ssh_password 二选一
+ssh_private_key_path: ""  # 可选：与 ssh_password 二选一
+ssh_private_key_passphrase: ""  # 可选
+ssh_command_wrapper: ""  # 可选：bash -lc（用于加载远端环境）
+sudo: false
+sudo_password: ""  # 可选：sudo=true 且需要口令时填写
+
+# 复杂命令建议写脚本，再用 @script: 引用（远端运维才支持“上传到远端执行”）：
+# - 本地脚本放：ops_scripts/<service_id>/start.sh 等
+# - YAML 写：@script:ops_scripts/<service_id>/start.sh
+
+# 2.3 本机运维（在“监控机本机”执行命令/脚本）
+# - plugin: localproc
+# - 既可用 start/stop/restart_cmds 写 docker/java/systemctl 等命令
+# - 也可用 local_script/local_args 启动一个本机 Python 子进程
+local_cwd: ""  # 可选：本机命令/脚本的工作目录（绝对路径或相对项目根目录）
+local_script: ""  # 例如 C:/apps/demo/app.py 或 local_test_service.py
+local_args: []
+
+# 若某些清理命令允许失败（例如 docker rm -f 不存在的容器），可用 @ignore: 前缀忽略非 0 返回码：
+# - "@ignore:docker rm -f your_container"
+
+# ===== 三、本机服务（无需 SSH，本机启停/重启）=====
+# 适用：服务就是运行在监控机本机（Windows/Linux 都可），想要在页面上启停。
+# 写法：
+# - plugin: "localproc"
+# - 优先方式 A：用 start/stop/restart_cmd(s) 写“本机命令”（例如 docker/systemctl/java/python 等）
+# - 方式 B：用 local_script/local_args 启动一个本机 Python 子进程（路径可为绝对路径或相对路径）
+# - ssh_* / sudo_* 均不需要填写
+local_cwd: ""  # 可选：本机命令/脚本的工作目录（可写绝对路径或相对项目根目录）
+local_script: ""
+local_args: []
+# 运维文档字段：前端会按固定模板展示
+ops_doc:
+  monitor: ""
+  start_steps: []
+  stop_steps: []
+  restart_steps: []
+  manual_ops: []
+  troubleshooting: []
+  contacts: []
+  api_doc: ""
+  notes: ""
 

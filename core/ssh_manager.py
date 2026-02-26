@@ -85,6 +85,23 @@ class SSHManager:
             self.client = None
             return None, str(e)
 
+    def upload_file(self, local_path: str, remote_path: str) -> Tuple[bool, str]:
+        if not self.client:
+            if not self.connect():
+                return False, "Connection failed"
+        try:
+            sftp = self.client.open_sftp()
+            try:
+                sftp.put(local_path, remote_path)
+            finally:
+                try:
+                    sftp.close()
+                except Exception:
+                    pass
+            return True, "ok"
+        except Exception as e:
+            return False, str(e)
+
     def close(self):
         if self.client:
             self.client.close()

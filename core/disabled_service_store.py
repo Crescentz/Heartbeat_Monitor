@@ -1,20 +1,21 @@
 from __future__ import annotations
 
 import json
-import os
+from pathlib import Path
 from typing import Dict
 
 
-DATA_DIR = "data"
-FILE_PATH = os.path.join(DATA_DIR, "service_disabled.json")
+def _file_path() -> Path:
+    root_dir = Path(__file__).resolve().parents[1]
+    return root_dir / "data" / "service_disabled.json"
 
 
 def get_disabled_map() -> Dict[str, bool]:
-    if not os.path.exists(FILE_PATH):
+    path = _file_path()
+    if not path.exists():
         return {}
     try:
-        with open(FILE_PATH, "r", encoding="utf-8") as f:
-            data = json.load(f)
+        data = json.loads(path.read_text(encoding="utf-8") or "{}")
         if isinstance(data, dict):
             out: Dict[str, bool] = {}
             for k, v in data.items():
@@ -31,13 +32,15 @@ def is_disabled(service_id: str) -> bool:
 
 
 def set_disabled(service_id: str, disabled: bool) -> None:
-    os.makedirs(DATA_DIR, exist_ok=True)
+    path = _file_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
     current = get_disabled_map()
     sid = str(service_id)
     if disabled:
         current[sid] = True
     else:
         current.pop(sid, None)
-    with open(FILE_PATH, "w", encoding="utf-8") as f:
-        json.dump(current, f, ensure_ascii=False, indent=2)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(current, ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp.replace(path)
 

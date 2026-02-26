@@ -4,7 +4,10 @@ import requests
 import logging
 import os
 import time
-from typing import Any, Dict, Optional, Tuple
+import json
+from typing import Any, Dict, List, Optional, Tuple
+
+from core.expected_matcher import match_expected
 
 class MineruService(BaseService):
     def __init__(self, service_id: str, config: Dict[str, Any], config_path: Optional[str] = None):
@@ -38,31 +41,53 @@ class MineruService(BaseService):
         if not test_api:
             return False, "Missing test_api", {"ok": False, "reason": "missing_test_api"}
 
-        if not os.path.exists(self.test_pdf_path):
-            return False, f"Test file not found: {self.test_pdf_path}", {"ok": False, "reason": "file_not_found"}
+        test_file_path = self.test_pdf_path
+        if not os.path.isabs(test_file_path):
+            test_file_path = os.path.join(os.getcwd(), test_file_path)
+        if not os.path.exists(test_file_path):
+            return False, f"Test file not found: {test_file_path}", {"ok": False, "reason": "file_not_found"}
 
         try:
-            field = str(self.config.get("file_field") or "file")
+            field = str(self.config.get("file_field") or "files")
+            field_as_list = self.config.get("file_field_as_list")
+            if field_as_list is None:
+                field_as_list = (field == "files")
             expected = self.config.get("expected_response")
             timeout_s = float(self.config.get("timeout_s") or 60)
+            max_elapsed_ms = self.config.get("max_elapsed_ms")
+            extra_form = self.config.get("file_extra_form") or {}
 
             start = time.time()
-            with open(self.test_pdf_path, "rb") as f:
-                files = {field: (os.path.basename(self.test_pdf_path), f, "application/pdf")}
-                r = requests.post(test_api, files=files, timeout=timeout_s)
+            with open(test_file_path, "rb") as f:
+                filename = os.path.basename(test_file_path)
+                if field_as_list:
+                    files = [(field, (filename, f, "application/pdf"))]
+                else:
+                    files = {field: (filename, f, "application/pdf")}
 
-            ok, reason = self._match_expected(r, expected)
+                data = self._normalize_multipart_form(extra_form)
+                r = requests.post(test_api, files=files, data=data, timeout=timeout_s)
+
+            ok, reason = match_expected(r, expected)
             detail = {
                 "ok": ok,
                 "status_code": r.status_code,
                 "elapsed_ms": int((time.time() - start) * 1000),
                 "response_excerpt": (r.text or "")[:800],
-                "file": os.path.basename(self.test_pdf_path),
+                "file": filename,
             }
+            if max_elapsed_ms is not None:
+                try:
+                    if int(detail["elapsed_ms"]) > int(max_elapsed_ms):
+                        return False, f"Slow response: {detail['elapsed_ms']}ms", {**detail, "reason": "slow_response"}
+                except Exception:
+                    pass
             if not ok:
                 return False, reason, detail
             return True, "", detail
 
+        except requests.exceptions.Timeout:
+            return False, "Timeout", {"ok": False, "reason": "timeout"}
         except Exception as e:
             return False, str(e), {"ok": False, "exception": str(e)}
 
@@ -79,9 +104,10 @@ class MineruService(BaseService):
             container_running = True
         elif "No such object" in err or "Error" in err:
             # Container doesn't exist, create it
+            api_port = int(self.config.get("api_port") or self.config.get("port") or 8000)
             run_cmd = (
                 f"sudo docker run --gpus all --shm-size 32g "
-                f"-p 30000:30000 -p 7860:7860 -p {self.config['port']}:8000 "
+                f"-p 30000:30000 -p 7860:7860 -p {api_port}:8000 "
                 f"--ipc=host -itd --name {self.container_name} "
                 f"-e MINERU_MODEL_SOURCE=local "
                 f"mineru:latest /bin/bash"
@@ -124,41 +150,80 @@ class MineruService(BaseService):
         time.sleep(5)
         return self.start_service()
 
-    def _get_cmds(self, key_single: str, key_multi: str) -> list[str]:
+    def _get_cmds(self, key_single: str, key_multi: str) -> List[str]:
         if self.config.get(key_multi) and isinstance(self.config.get(key_multi), list):
             return [str(x) for x in self.config.get(key_multi) if str(x).strip()]
         v = str(self.config.get(key_single) or "").strip()
         return [v] if v else []
 
-    def _run_cmds(self, cmds: list[str]):
+    def _run_cmds(self, cmds: List[str]):
         if not cmds:
             return False, "Missing command"
         wrapper = str(self.config.get("ssh_command_wrapper") or "").strip() or None
         for cmd in cmds:
+            c = str(cmd or "").strip()
+            if c.startswith("@script:") or c.startswith("script:"):
+                ########## 在这里使用“脚本式启停命令” ##########
+                # 功能是：
+                # - YAML 的 start_cmds/stop_cmds/restart_cmds 支持写 @script:相对路径
+                # - 程序会把本地脚本上传到远端 /tmp/heartbeat_monitor_scripts/<service_id>/ 并用 bash 执行
+                #
+                # 样例是：
+                # - "@script:ops_scripts/<service_id>/restart.sh"
+                #
+                # 参考文档是：
+                # - docs/config_reference.md（3.1 使用脚本文件）
+                # - ops_scripts/README.md（目录规范与示例）
+                ########## 逻辑开始 ##########
+                local_path = c.split(":", 1)[1].strip()
+                if not os.path.isabs(local_path):
+                    local_path = os.path.join(os.getcwd(), local_path)
+                if not os.path.exists(local_path):
+                    return False, f"Script not found: {local_path}"
+                remote_dir = f"/tmp/heartbeat_monitor_scripts/{self.service_id}"
+                remote_path = f"{remote_dir}/{os.path.basename(local_path)}"
+                out, err = self.ssh.execute_command(f"mkdir -p {remote_dir}", sudo=True, wrapper=wrapper)
+                if err:
+                    return False, err
+                up_ok, up_msg = self.ssh.upload_file(local_path, remote_path)
+                if not up_ok:
+                    return False, up_msg
+                out, err = self.ssh.execute_command(f"chmod +x {remote_path}", sudo=True, wrapper=wrapper)
+                if err:
+                    return False, err
+                out, err = self.ssh.execute_command(f"bash {remote_path}", sudo=True, wrapper=wrapper)
+                if err:
+                    return False, err
+                continue
             out, err = self.ssh.execute_command(cmd, sudo=True, wrapper=wrapper)
             if err:
                 return False, err
         return True, "OK"
 
     def _match_expected(self, response: requests.Response, expected: Any) -> Tuple[bool, str]:
-        if response.status_code >= 500:
-            return False, f"HTTP {response.status_code}"
-        if expected is None:
-            return (200 <= response.status_code < 300), f"HTTP {response.status_code}"
-        if isinstance(expected, dict):
-            try:
-                body = response.json()
-            except Exception:
-                return False, "Response is not JSON"
-            for k, v in expected.items():
-                if body.get(k) != v:
-                    return False, f"Expected {k}={v}"
-            return True, ""
-        if isinstance(expected, str):
-            if expected in (response.text or ""):
-                return True, ""
-            return False, f"Expected substring not found: {expected}"
-        return True, ""
+        return match_expected(response, expected)
+
+    def _normalize_multipart_form(self, extra_form: Any):
+        if not extra_form:
+            return []
+        if isinstance(extra_form, list):
+            return [(str(k), str(v)) for k, v in extra_form]
+        if not isinstance(extra_form, dict):
+            return [("value", str(extra_form))]
+        items = []
+        for k, v in extra_form.items():
+            key = str(k)
+            if isinstance(v, list):
+                for one in v:
+                    items.append((key, str(one)))
+                continue
+            if isinstance(v, (dict, tuple)):
+                items.append((key, json.dumps(v, ensure_ascii=False)))
+                continue
+            if v is None:
+                continue
+            items.append((key, str(v)))
+        return items
 
 
 def create_service(service_id: str, cfg: Dict[str, Any], config_path: str) -> MineruService:

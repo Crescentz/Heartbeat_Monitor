@@ -1,0 +1,18 @@
+enabled: false
+id: "local_alert_demo"
+name: "本机仅提示样例服务"
+description: |
+  本机服务样例（18080）。失败策略=仅提示（alert），不自动重启。
+  复制到 config/services/ 后按需修改并改为 enabled: true。
+category: "api"
+auto_check: true
+check_schedule: "10s"
+on_failure: "alert"
+plugin: ""
+
+host: "127.0.0.1"
+test_api: "http://127.0.0.1:18080/health"
+expected_response:
+  ok: true
+timeout_s: 2
+max_elapsed_ms: null

@@ -1,0 +1,6 @@
+{
+  "local_restart_demo": true,
+  "local_test_01": true,
+  "mineru_01": true,
+  "local_alert_demo": true
+}

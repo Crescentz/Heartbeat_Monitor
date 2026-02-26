@@ -1,0 +1,41 @@
+enabled: false
+id: "example_service"
+name: "脚本式启停样例（远端 SSH 执行）"
+description: |
+  示例：复杂启停命令建议写脚本，然后在 *_cmds 里用 @script: 引用。
+  注意：@script: 会把本地脚本上传到远端并执行，因此必须能 SSH 登录目标机。
+  复制到 config/services/ 后按需修改并改为 enabled: true。
+category: "other"
+auto_check: true
+check_schedule: "1m"
+on_failure: "alert"
+host: "192.168.1.100"
+ssh_port: 22
+ssh_user: "your_user"
+ssh_password: "your_password"
+sudo: true
+test_api: "http://192.168.1.100:18080/health"
+timeout_s: 10
+expected_response: "ok"
+start_cmds:
+  - "@script:ops_scripts/example_service/start.sh"
+stop_cmds:
+  - "@script:ops_scripts/example_service/stop.sh"
+restart_cmds:
+  - "@script:ops_scripts/example_service/restart.sh"
+ops_doc:
+  monitor: "健康检查：访问 /health；expected_response 为字符串时表示响应文本包含该子串。"
+  start_steps:
+    - "@script:ops_scripts/example_service/start.sh"
+  stop_steps:
+    - "@script:ops_scripts/example_service/stop.sh"
+  restart_steps:
+    - "@script:ops_scripts/example_service/restart.sh"
+  troubleshooting:
+    - "本样例需要能 SSH 登录目标机（@script 会上传脚本到目标机执行）"
+    - "确认目标机端口是否监听：ss -lntp | grep 18080"
+    - "确认服务日志：tail -n 200 /var/log/your-service.log"
+  contacts: []
+  api_doc: ""
+  notes: ""
+

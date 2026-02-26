@@ -17,7 +17,36 @@ def create_service(service_id: str, cfg: dict, config_path: str):
     ...
 ```
 
-系统会通过 [service_loader.py](file:///d:/CODE/PyCODE/Heartbeat_Monitor/core/service_loader.py) 动态加载并调用该工厂函数。
+系统会通过 [service_loader.py](file:///d:/CODE/PyCODE/Heartbeat_Monitor/core/service_loader.py) 动态加载并调用该工厂函数（入口与调用点见 [service_loader.py:L56-L106](file:///d:/CODE/PyCODE/Heartbeat_Monitor/core/service_loader.py#L56-L106)）。
+
+## 2.1 最小可用插件骨架（可直接复制）
+例如要新增 `plugin: "demo"`：
+
+1）新建文件：`services/demo_service.py`
+
+2）写入最小骨架（示意）：
+```python
+from typing import Any, Dict, Optional, Tuple
+
+from core.base_service import BaseService
+
+
+class DemoService(BaseService):
+    def __init__(self, service_id: str, cfg: Dict[str, Any], config_path: Optional[str] = None):
+        super().__init__(service_id=service_id, name=str(cfg.get("name") or service_id), description=str(cfg.get("description") or ""), config=cfg, config_path=config_path)
+
+    def check_health(self) -> Tuple[bool, str, Dict[str, Any]]:
+        return True, "ok", {"ok": True}
+
+
+def create_service(service_id: str, cfg: Dict[str, Any], config_path: str):
+    return DemoService(service_id, cfg, config_path=config_path)
+```
+
+3）在 YAML 里启用：
+```yaml
+plugin: "demo"
+```
 
 ## 3. 服务对象接口
 插件服务对象需继承 [BaseService](file:///d:/CODE/PyCODE/Heartbeat_Monitor/core/base_service.py)，并实现：

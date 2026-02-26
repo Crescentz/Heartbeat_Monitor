@@ -52,6 +52,8 @@ def _validate_item(cfg: Dict[str, Any]) -> List[str]:
     if not test_api:
         errors.append("missing: test_api")
 
+    plugin = str(cfg.get("plugin") or "").strip()
+
     start_cmd = str(cfg.get("start_cmd") or "").strip()
     stop_cmd = str(cfg.get("stop_cmd") or "").strip()
     restart_cmd = str(cfg.get("restart_cmd") or "").strip()
@@ -59,6 +61,12 @@ def _validate_item(cfg: Dict[str, Any]) -> List[str]:
     stop_cmds = cfg.get("stop_cmds") if isinstance(cfg.get("stop_cmds"), list) else []
     restart_cmds = cfg.get("restart_cmds") if isinstance(cfg.get("restart_cmds"), list) else []
     needs_ssh = bool(start_cmd or stop_cmd or restart_cmd or start_cmds or stop_cmds or restart_cmds)
+
+    local_script = str(cfg.get("local_script") or "").strip()
+    if plugin == "localproc":
+        needs_ssh = False
+        if not (local_script or start_cmd or stop_cmd or restart_cmd or start_cmds or stop_cmds or restart_cmds):
+            errors.append("missing: local_script or start/stop/restart_cmd(s)")
 
     if needs_ssh:
         ssh_user = str(cfg.get("ssh_user") or cfg.get("username") or "").strip()
@@ -75,7 +83,6 @@ def _validate_item(cfg: Dict[str, Any]) -> List[str]:
         if ssh_private_key and "BEGIN OPENSSH PRIVATE KEY" not in ssh_private_key and "BEGIN RSA PRIVATE KEY" not in ssh_private_key:
             errors.append("ssh_private_key_format_suspicious")
 
-    plugin = str(cfg.get("plugin") or "").strip()
     if plugin:
         plugin_path = os.path.join("services", f"{plugin}_service.py")
         if not os.path.exists(plugin_path):
@@ -92,6 +99,9 @@ def main() -> int:
         print("依赖缺失：", ", ".join(missing))
         print("请执行：python -m pip install -r requirements.txt")
         print("")
+        if "yaml" in missing:
+            print("配置 YAML 检查已跳过（需要先安装 PyYAML）")
+            return 0
 
     os.makedirs(os.path.join("data", "logs"), exist_ok=True)
 
@@ -100,6 +110,7 @@ def main() -> int:
     if not paths:
         print(f"未发现服务配置：{config_dir}/*.yaml")
         print("建议复制模板：config/services_template.yaml -> config/services/<name>.yaml")
+        print("也可以复制样例：config/samples/*.yaml -> config/services/<name>.yaml")
         return 0
 
     total = 0

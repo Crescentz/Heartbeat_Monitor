@@ -1,0 +1,33 @@
+enabled: false
+id: "local_restart_demo"
+name: "本机失败重启样例服务"
+description: |
+  本机服务样例（18081）。可用 local_script 启动本机 Python 子进程，也可改为用 start/stop/restart_cmd(s) 执行任意本机命令。
+  复制到 config/services/ 后按需修改并改为 enabled: true。
+category: "api"
+auto_check: true
+check_schedule: "10s"
+on_failure: "restart"
+auto_fix: true
+plugin: "localproc"
+
+host: "127.0.0.1"
+test_api: "http://127.0.0.1:18081/health"
+expected_response:
+  ok: true
+timeout_s: 2
+max_elapsed_ms: null
+
+local_cwd: ""
+local_script: "local_restart_api.py"
+local_args: []
+ops_doc:
+  monitor: "本机健康检查：访问 http://127.0.0.1:18081/health，JSON ok=true 则认为正常。"
+  restart_steps:
+    - "失败策略=restart：健康检查失败时自动重启本机子进程（无需 SSH）"
+  troubleshooting:
+    - "确认端口是否被占用：本机 18081"
+    - "看事件日志里的自动重启记录"
+  contacts: []
+  api_doc: ""
+  notes: ""
