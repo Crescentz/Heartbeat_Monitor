@@ -9694,3 +9694,15 @@ RuntimeError: cannot schedule new futures after shutdown
 2026-02-26 20:45:41,833 - werkzeug - INFO - 127.0.0.1 - - [26/Feb/2026 20:45:41] "GET /api/services?q=&category=all&on_failure=all&status=all&only_failed=0&page=1&page_size=10 HTTP/1.1" 200 -
 2026-02-26 20:45:41,839 - werkzeug - INFO - 127.0.0.1 - - [26/Feb/2026 20:45:41] "GET /api/errors?n=10&days=7 HTTP/1.1" 200 -
 2026-02-26 20:45:41,847 - werkzeug - INFO - 127.0.0.1 - - [26/Feb/2026 20:45:41] "GET /api/events?n=30&days=7 HTTP/1.1" 200 -
+2026-02-26 20:45:44,842 - werkzeug - INFO - 127.0.0.1 - - [26/Feb/2026 20:45:44] "GET /api/services?q=&category=all&on_failure=all&status=all&only_failed=0&page=1&page_size=10 HTTP/1.1" 200 -
+2026-02-26 20:45:44,846 - werkzeug - INFO - 127.0.0.1 - - [26/Feb/2026 20:45:44] "GET /api/errors?n=10&days=7 HTTP/1.1" 200 -
+2026-02-26 20:45:44,854 - werkzeug - INFO - 127.0.0.1 - - [26/Feb/2026 20:45:44] "GET /api/events?n=30&days=7 HTTP/1.1" 200 -
+2026-02-26 20:45:47,837 - werkzeug - INFO - 127.0.0.1 - - [26/Feb/2026 20:45:47] "GET /api/services?q=&category=all&on_failure=all&status=all&only_failed=0&page=1&page_size=10 HTTP/1.1" 200 -
+2026-02-26 20:45:47,843 - werkzeug - INFO - 127.0.0.1 - - [26/Feb/2026 20:45:47] "GET /api/errors?n=10&days=7 HTTP/1.1" 200 -
+2026-02-26 20:45:47,858 - werkzeug - INFO - 127.0.0.1 - - [26/Feb/2026 20:45:47] "GET /api/events?n=30&days=7 HTTP/1.1" 200 -
+2026-02-26 20:45:48,764 - apscheduler.executors.default - INFO - Running job "MonitorEngine.check_one (trigger: interval[0:00:30], next run at: 2026-02-26 20:46:18 CST)" (scheduled at 2026-02-26 20:45:48.758642+08:00)
+2026-02-26 20:45:48,767 - apscheduler.executors.default - INFO - Job "MonitorEngine.check_one (trigger: interval[0:00:30], next run at: 2026-02-26 20:46:18 CST)" executed successfully
+2026-02-26 20:45:49,290 - apscheduler.executors.default - INFO - Job "MonitorEngine.check_one (trigger: interval[0:01:00], next run at: 2026-02-26 20:46:28 CST)" executed successfully
+2026-02-26 20:45:50,840 - werkzeug - INFO - 127.0.0.1 - - [26/Feb/2026 20:45:50] "GET /api/services?q=&category=all&on_failure=all&status=all&only_failed=0&page=1&page_size=10 HTTP/1.1" 200 -
+2026-02-26 20:45:50,851 - werkzeug - INFO - 127.0.0.1 - - [26/Feb/2026 20:45:50] "GET /api/errors?n=10&days=7 HTTP/1.1" 200 -
+2026-02-26 20:45:50,867 - werkzeug - INFO - 127.0.0.1 - - [26/Feb/2026 20:45:50] "GET /api/events?n=30&days=7 HTTP/1.1" 200 -

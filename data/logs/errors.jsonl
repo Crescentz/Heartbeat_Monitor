@@ -351,3 +351,4 @@
 {"ts": "2026-02-26 20:45:19", "ts_epoch": 1772109919, "service_id": "mineru_01", "service_name": "Mineru OCR", "reason": "Timeout"}
 {"ts": "2026-02-26 20:45:28", "ts_epoch": 1772109928, "service_id": "local_alert_demo", "service_name": "本机仅提示样例服务", "reason": "Timeout"}
 {"ts": "2026-02-26 20:45:30", "ts_epoch": 1772109930, "service_id": "local_alert_demo", "service_name": "本机仅提示样例服务", "reason": "Timeout"}
+{"ts": "2026-02-26 20:45:49", "ts_epoch": 1772109949, "service_id": "mineru_01", "service_name": "Mineru OCR", "reason": "Timeout"}
