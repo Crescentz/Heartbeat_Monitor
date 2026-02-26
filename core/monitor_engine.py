@@ -83,7 +83,7 @@ class MonitorEngine:
                 continue
             if bool(getattr(s, "config", {}).get("_disabled", False)):
                 continue
-            if not bool(s.config.get("auto_check", True)):
+            if not bool(s.config.get("_auto_check_enabled", s.config.get("auto_check", True))):
                 continue
             self.check_one(service_id, allow_fix=True)
 
@@ -143,7 +143,7 @@ class MonitorEngine:
                 return True, f"{msg}; status={'Healthy' if r.ok else 'Unhealthy'}; {r.message}".strip("; ")
             return ok, msg
         if action == "check":
-            r = self.check_one(service_id, allow_fix=allow_fix)
+            r = self.check_one(service_id, allow_fix=False)
             append_event(service.service_id, service.name, "info" if r.ok else "error", "check_manual", r.message)
             return True, f"Check complete: {'Healthy' if r.ok else 'Unhealthy'}; {r.message}".strip("; ")
         return False, "Unsupported action"

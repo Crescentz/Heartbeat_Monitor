@@ -57,8 +57,9 @@ class BaseService(ABC):
         ops_capable = has_start or has_stop or has_restart
 
         category = str(config.get("category") or config.get("service_type") or "api").lower()
-        auto_check = bool(config.get("auto_check", True))
+        auto_check = bool(config.get("_auto_check_enabled", config.get("auto_check", True)))
         on_failure = str(config.get("on_failure") or "alert").lower()
+        auto_restart = (on_failure == "restart") and bool(config.get("auto_fix", True))
         check_schedule = str(config.get("check_schedule") or "").strip()
         base_check_schedule = str(config.get("_base_check_schedule") or "").strip()
         disabled = bool(config.get("_disabled", False))
@@ -83,6 +84,7 @@ class BaseService(ABC):
             "category": category,
             "auto_check": auto_check,
             "on_failure": on_failure,
+            "auto_restart": auto_restart,
             "check_schedule": check_schedule,
             "base_check_schedule": base_check_schedule,
             "disabled": disabled,
@@ -91,6 +93,9 @@ class BaseService(ABC):
             "can_start": has_start and (not disabled) and ops_enabled,
             "can_stop": has_stop and (not disabled) and ops_enabled,
             "can_restart": has_restart and (not disabled) and ops_enabled,
+            "start_capable": has_start,
+            "stop_capable": has_stop,
+            "restart_capable": has_restart,
             "host": config.get("host") or config.get("ip") or "N/A",
             "test_api": config.get("test_api") or "",
             "config_path": self.config_path or "",

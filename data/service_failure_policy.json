@@ -1,0 +1,5 @@
+{
+  "policies": {
+    "local_restart_demo": "restart"
+  }
+}

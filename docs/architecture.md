@@ -42,3 +42,5 @@
 - `data/service_bindings.json`：服务与用户绑定关系
 - `data/schedule_overrides.json`：前台设置的检测频率覆盖值
 - `data/service_disabled.json`：服务禁用开关（超管前台设置）
+- `data/service_auto_check.json`：服务级自动检测开关（纳管后默认关闭；开启后才创建定时任务）
+- `data/service_failure_policy.json`：服务级失败策略覆盖（仅检测/自动重启）

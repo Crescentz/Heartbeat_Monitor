@@ -79,8 +79,8 @@
             <label class="form-label mb-1">失败策略</label>
             <select class="form-select form-select-sm" id="filterFailure">
               <option value="all">全部</option>
-              <option value="alert">仅提示</option>
-              <option value="restart">失败重启</option>
+              <option value="alert">仅检测</option>
+              <option value="restart">自动重启</option>
             </select>
           </div>
           <div class="col-12 col-md-2">
@@ -308,13 +308,14 @@
 
     function policyBadge(s) {
       const parts = [];
-      if (String(s.on_failure || "").toLowerCase() === "restart") {
-        parts.push(`<span class="badge bg-light border border-warning text-warning">失败重启</span>`);
-      } else {
-        parts.push(`<span class="badge bg-light border text-secondary">仅提示</span>`);
-      }
+      const autoRestart = !!s.auto_restart;
+      parts.push(
+        autoRestart
+          ? `<span class="badge bg-light border border-warning text-warning">自动重启</span>`
+          : `<span class="badge bg-light border text-secondary">仅检测</span>`
+      );
       if (!s.auto_check) {
-        parts.push(`<span class="badge text-bg-secondary">不自动检测</span>`);
+        parts.push(`<span class="badge text-bg-secondary">未开启自动检测</span>`);
       }
       return parts.join(" ");
     }
@@ -343,7 +344,8 @@
     function buildOpsDocHtml(s) {
       const doc = normalizeOpsDoc(s.ops_doc);
       const onFailure = String(s.on_failure || "alert");
-      const failureHint = onFailure === "restart" ? "失败后自动重启（可在事件日志查看重启结果）" : "失败仅提示人工处理";
+      const autoRestart = !!s.auto_restart;
+      const failureHint = autoRestart ? "失败后自动重启（可在事件日志查看重启结果）" : "失败仅提示人工处理";
       return `
         <div class="mb-3">
           <div class="fw-semibold mb-2">基础信息</div>
@@ -909,6 +911,8 @@
     }
 
     async function loadAll() {
+      if (state.inflight) return;
+      state.inflight = true;
       try {
         const servicesData = await fetchServices();
         renderServices(servicesData.services || [], servicesData.total || 0, servicesData.pages || 1);
@@ -932,6 +936,8 @@
           const box = document.getElementById("errorsBox");
           if (box) box.innerHTML = `<div class="text-danger">刷新失败：${escapeHtml(msg)}</div>`;
         } catch {}
+      } finally {
+        state.inflight = false;
       }
     }
 
@@ -1039,13 +1045,6 @@
       loadAll();
     }, 3000);
 
-    async function adminFetch(url, options) {
-      const resp = await fetch(url, options || {});
-      const data = await resp.json().catch(() => ({}));
-      if (!resp.ok) throw new Error(data.error || data.message || `HTTP ${resp.status}`);
-      return data;
-    }
-
     function ensureAdminModal() {
       if (document.getElementById("adminModal")) return;
       document.getElementById("overlayModalsRoot").insertAdjacentHTML("beforeend", `
@@ -1136,7 +1135,7 @@
     }
 
     async function loadUsers() {
-      const data = await adminFetch("/api/admin/users");
+      const data = await fetchJson("/api/admin/users");
       const body = document.getElementById("usersBody");
       body.innerHTML = (data.users || []).map(u => {
         const username = String(u.username || "");
@@ -1165,11 +1164,12 @@
     }
 
     async function loadBindings() {
-      const data = await adminFetch("/api/admin/bindings");
-      const schedules = await adminFetch("/api/admin/schedules");
+      const data = await fetchJson("/api/admin/bindings");
+      const schedules = await fetchJson("/api/admin/schedules");
       const bindings = data.bindings || {};
       const base = schedules.base || {};
       const overrides = schedules.overrides || {};
+      const enabled = schedules.enabled || {};
       const services = data.services || [];
       const body = document.getElementById("bindingsBody");
       const hint = document.getElementById("bindingsSaveHint");
@@ -1177,7 +1177,9 @@
         const v = (bindings[sid] || []).join(",");
         const sidKey = safeId(sid);
         const sidJson = JSON.stringify(String(sid));
-        const scheduleValue = String(overrides[sid] || base[sid] || "").trim();
+        const baseValue = String(overrides[sid] || base[sid] || "").trim();
+        const isEnabled = Object.prototype.hasOwnProperty.call(enabled, sid) ? !!enabled[sid] : (String(baseValue).toLowerCase() !== "off");
+        const scheduleValue = isEnabled ? baseValue : "off";
         return `<tr>
           <td><code>${escapeHtml(sid)}</code></td>
           <td>
@@ -1203,7 +1205,7 @@
       const username = document.getElementById("newUserName").value.trim();
       const password = document.getElementById("newUserPwd").value;
       const role = document.getElementById("newUserRole").value;
-      const data = await adminFetch("/api/admin/users", {
+      const data = await fetchJson("/api/admin/users", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ username, password, role, can_control: false })
@@ -1216,7 +1218,7 @@
     }
 
     async function setUserControl(username, canControl) {
-      const data = await adminFetch(`/api/admin/users/${encodeURIComponent(username)}/control`, {
+      const data = await fetchJson(`/api/admin/users/${encodeURIComponent(username)}/control`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ can_control: !!canControl })
@@ -1227,7 +1229,7 @@
 
     async function deleteUser(username) {
       if (!confirm(`确认删除用户 ${username}？`)) return;
-      const data = await adminFetch(`/api/admin/users/${encodeURIComponent(username)}`, { method: "DELETE" });
+      const data = await fetchJson(`/api/admin/users/${encodeURIComponent(username)}`, { method: "DELETE" });
       alert(data.message || "ok");
       await loadUsers();
       await loadBindings();
@@ -1236,7 +1238,7 @@
     async function resetUserPwd(username) {
       const pwd = prompt(`为 ${username} 设置新密码（至少4位）：`);
       if (!pwd) return;
-      const data = await adminFetch(`/api/admin/users/${encodeURIComponent(username)}/password`, {
+      const data = await fetchJson(`/api/admin/users/${encodeURIComponent(username)}/password`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ password: pwd })
@@ -1281,12 +1283,12 @@
     async function saveOneBindingAndSchedule(sid) {
       const users = parseUsers(getBindValue(sid));
       const check_schedule = getSchedValue(sid);
-      await adminFetch("/api/admin/bindings", {
+      await fetchJson("/api/admin/bindings", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ service_id: sid, users })
       });
-      await adminFetch("/api/admin/schedules", {
+      await fetchJson("/api/admin/schedules", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ service_id: sid, check_schedule })
@@ -1372,7 +1374,7 @@
         try { prev = String(localStorage.getItem(autoKey(sid)) || "").trim(); } catch {}
         if (schedEl) schedEl.value = prev || "";
       }
-      await adminFetch("/api/admin/schedules", {
+      await fetchJson("/api/admin/schedules", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ service_id: sid, check_schedule: String(schedEl ? schedEl.value : "").trim() })
@@ -1387,7 +1389,7 @@
       const current = String((svc.check_schedule || "")).trim();
       if (!enabled) {
         try { localStorage.setItem(autoKey(sid), current && current.toLowerCase() !== "off" ? current : ""); } catch {}
-        await adminFetch("/api/admin/schedules", {
+        await fetchJson("/api/admin/schedules", {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ service_id: sid, check_schedule: "off" })
@@ -1395,7 +1397,7 @@
       } else {
         let prev = "";
         try { prev = String(localStorage.getItem(autoKey(sid)) || "").trim(); } catch {}
-        await adminFetch("/api/admin/schedules", {
+        await fetchJson("/api/admin/schedules", {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ service_id: sid, check_schedule: prev || "" })
@@ -1423,6 +1425,11 @@
                   <input class="form-check-input" type="checkbox" id="scheduleModalAuto">
                   <label class="form-check-label" for="scheduleModalAuto">自动检测</label>
                 </div>
+                <div class="form-check form-switch mb-3">
+                  <input class="form-check-input" type="checkbox" id="scheduleModalAutoRestart">
+                  <label class="form-check-label" for="scheduleModalAutoRestart">失败后自动重启</label>
+                </div>
+                <div class="text-muted small mt-1" id="scheduleModalRestartHint"></div>
                 <label class="form-label mb-1">检测频率</label>
                 <input class="form-control" id="scheduleModalValue" placeholder="30m / 10s / daily@02:30 / off">
                 <div class="text-muted small mt-2">留空表示使用默认频率；填 <code>off</code> 表示关闭自动检测。</div>
@@ -1436,6 +1443,8 @@
         </div>
       `);
       document.getElementById("scheduleModalSaveBtn").onclick = saveScheduleModal;
+      const autoEl = document.getElementById("scheduleModalAuto");
+      if (autoEl) autoEl.onchange = applyScheduleModalAutoToggle;
     }
 
     function openScheduleModal(serviceId) {
@@ -1444,14 +1453,50 @@
       ensureScheduleModal();
       const svc = serviceIndex[sid] || {};
       const auto = !!svc.auto_check;
+      const autoRestart = !!svc.auto_restart;
+      const restartCapable = !!svc.restart_capable;
+      const opsEnabled = !!svc.ops_enabled;
       const base = String(svc.base_check_schedule || "").trim();
       const cur = String(svc.check_schedule || "").trim();
       document.getElementById("scheduleModalSid").textContent = sid;
       document.getElementById("scheduleModalAuto").checked = auto;
-      document.getElementById("scheduleModalValue").value = auto ? (cur || base || "") : "off";
+      const restartEl = document.getElementById("scheduleModalAutoRestart");
+      const restartHint = document.getElementById("scheduleModalRestartHint");
+      if (restartEl) {
+        restartEl.checked = autoRestart;
+        restartEl.disabled = !restartCapable;
+      }
+      if (restartHint) {
+        restartHint.textContent = !restartCapable ? "该服务未配置重启能力（restart_cmds），无法开启自动重启" : (!opsEnabled ? "提示：若服务处于“只监控”，即使开启自动重启也不会执行重启；需先切换为“可运维”" : "");
+      }
+      const valueEl = document.getElementById("scheduleModalValue");
+      if (valueEl) {
+        valueEl.dataset.base = base || "";
+        valueEl.value = auto ? (cur || base || "") : "off";
+      }
       document.getElementById("scheduleModalBase").textContent = base ? `默认频率：${base}` : "";
       const modal = bootstrap.Modal.getOrCreateInstance(document.getElementById("scheduleModal"));
       modal.show();
+    }
+
+    function applyScheduleModalAutoToggle() {
+      const sid = String(scheduleState.service_id || "");
+      if (!sid) return;
+      const autoEl = document.getElementById("scheduleModalAuto");
+      const valueEl = document.getElementById("scheduleModalValue");
+      if (!autoEl || !valueEl) return;
+      const enabled = !!autoEl.checked;
+      const cur = String(valueEl.value || "").trim();
+      if (!enabled) {
+        try { localStorage.setItem(autoKey(sid), cur && cur.toLowerCase() !== "off" ? cur : ""); } catch {}
+        valueEl.value = "off";
+        return;
+      }
+      if (cur.toLowerCase() !== "off") return;
+      let prev = "";
+      try { prev = String(localStorage.getItem(autoKey(sid)) || "").trim(); } catch {}
+      const base = String(valueEl.dataset.base || "").trim();
+      valueEl.value = prev || base || "";
     }
 
     async function saveScheduleModal() {
@@ -1461,16 +1506,36 @@
       let v = String(document.getElementById("scheduleModalValue").value || "").trim();
       if (!auto) v = "off";
       try {
-        await adminFetch("/api/admin/schedules", {
+        const saveBtn = document.getElementById("scheduleModalSaveBtn");
+        if (saveBtn) {
+          saveBtn.disabled = true;
+          saveBtn.textContent = "保存中...";
+        }
+
+        await fetchJson("/api/admin/schedules", {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ service_id: sid, check_schedule: v })
         });
-        await loadAll();
+        const restartEl = document.getElementById("scheduleModalAutoRestart");
+        if (restartEl && !restartEl.disabled) {
+          await fetchJson("/api/admin/failure_policy", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ service_id: sid, auto_restart: !!restartEl.checked })
+          });
+        }
         const modal = bootstrap.Modal.getOrCreateInstance(document.getElementById("scheduleModal"));
         modal.hide();
+        loadAll().catch(() => {});
       } catch (e) {
         alert(String(e && e.message ? e.message : e));
+      } finally {
+        const saveBtn = document.getElementById("scheduleModalSaveBtn");
+        if (saveBtn) {
+          saveBtn.disabled = false;
+          saveBtn.textContent = "保存";
+        }
       }
     }
 
@@ -1496,7 +1561,7 @@
       changePwdBtn.onclick = async () => {
         const pwd = prompt("设置新密码（至少4位）：");
         if (!pwd) return;
-        const data = await adminFetch("/api/me/password", {
+        const data = await fetchJson("/api/me/password", {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ password: pwd })

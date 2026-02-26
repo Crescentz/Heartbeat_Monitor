@@ -17,6 +17,7 @@
 - **心跳检测**：
   - 定时任务（如每30分钟）。
   - 支持复杂检测逻辑（如上传PDF测试OCR功能），不仅仅是端口通断。
+  - 服务纳管后可先保持“未开启自动检测”，由超管手动开启后才加入定时任务。
 - **分类纳管**：
   - 支持 API 类、网页类等分类。
   - 网页类以“可访问性/关键字”作为检测依据，不强制要求远程启停能力。
@@ -64,6 +65,8 @@ Heartbeat_Monitor/
 │   ├── ssh_manager.py          # SSH连接管理
 │   ├── service_loader.py       # 从 config/services/ 自动加载服务
 │   ├── monitor_engine.py       # 检测与控制编排
+│   ├── auto_check_store.py     # 服务级自动检测开关（持久化）
+│   ├── failure_policy_store.py # 服务级失败策略覆盖（持久化）
 │   ├── error_log.py            # 错误日志（最近N条）
 │   └── storage.py              # 数据目录初始化
 ├── monitor/
@@ -76,6 +79,8 @@ Heartbeat_Monitor/
 │   └── index.html              # 运维界面模板
 ├── data/
 │   ├── logs/                 # 运行日志
+│   ├── service_auto_check.json      # 自动检测开关
+│   ├── service_failure_policy.json  # 失败策略开关（仅检测/自动重启）
 │   └── test.pdf              # 示例上传文件
 ├── docs/
 │   └── project_context.md    # 本文档
@@ -92,7 +97,8 @@ Heartbeat_Monitor/
 - **新增服务（推荐：仅YAML）**：
   - 复制 [services_template.yaml](file:///d:/CODE/PyCODE/Heartbeat_Monitor/config/services_template.yaml) 为 `config/services/<你的服务>.yaml`
   - 或复制 `config/samples/*.yaml` 到 `config/services/` 后再按需修改
-  - 填写 `category / test_api / expected_response`，并用 `on_failure` 选择失败策略（仅提示/自动重启）
+  - 填写 `category / test_api / expected_response`，并用 `on_failure` 选择失败策略（仅检测/自动重启）
+  - 新增服务纳管后默认先不参与定时检测；由超管在页面开启“自动检测”后才会加入调度
   - 无需修改 `main.py`
 - **新增服务（插件方式：适用于非标准API）**：
   - 新增 `services/<plugin>_service.py`，暴露 `create_service(service_id, cfg, config_path)` 工厂函数

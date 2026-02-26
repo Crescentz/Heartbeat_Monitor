@@ -7,7 +7,9 @@ from flask import Flask, jsonify, redirect, render_template, request, session, u
 
 from core.app_secrets import load_or_create_secret_key
 from core.acl_store import allowed_service_ids, get_bindings, set_service_users
+from core.auto_check_store import get_auto_check_enabled_map, seed_auto_check_enabled, set_auto_check_enabled
 from core.check_schedule import job_id_for_service, parse_check_schedule
+from core.failure_policy_store import get_policies, set_policy
 from core.schedule_override_store import get_overrides, set_override
 from core.disabled_service_store import get_disabled_map, set_disabled
 from core.ops_mode_store import get_ops_enabled_map, seed_ops_enabled, set_ops_enabled
@@ -31,11 +33,44 @@ def create_app(engine: MonitorEngine, scheduler=None) -> Flask:
     disabled_map = get_disabled_map()
     seed_ops_enabled(sorted(list(engine.services.keys())), default_enabled=True)
     ops_enabled_map = get_ops_enabled_map()
+    overrides = get_overrides()
+    initial_auto_check = {}
+    for sid, svc in engine.services.items():
+        cfg = getattr(svc, "config", {}) if isinstance(getattr(svc, "config", None), dict) else {}
+        sv = str(overrides.get(str(sid)) or "").strip().lower()
+        if sv in ("off", "pause", "paused", "disabled", "disable"):
+            initial_auto_check[str(sid)] = False
+        elif str(sid) in overrides and bool(sv):
+            initial_auto_check[str(sid)] = True
+        else:
+            initial_auto_check[str(sid)] = bool(cfg.get("auto_check", True))
+    seed_auto_check_enabled(sorted(list(engine.services.keys())), default_enabled=True, initial_map=initial_auto_check)
+    auto_check_enabled_map = get_auto_check_enabled_map()
+    failure_policies = get_policies()
     for sid, svc in engine.services.items():
         if isinstance(getattr(svc, "config", None), dict) and disabled_map.get(str(sid)):
             svc.config["_disabled"] = True
         if isinstance(getattr(svc, "config", None), dict):
             svc.config["_ops_enabled"] = bool(ops_enabled_map.get(str(sid), False))
+            policy = str(failure_policies.get(str(sid)) or "").strip().lower()
+            if policy == "alert":
+                svc.config["on_failure"] = "alert"
+                svc.config["auto_fix"] = False
+            elif policy == "restart":
+                svc.config["on_failure"] = "restart"
+                svc.config["auto_fix"] = True
+
+            sv = str(overrides.get(str(sid)) or "").strip()
+            if sv.lower() in ("off", "pause", "paused", "disabled", "disable"):
+                svc.config["_auto_check_enabled"] = False
+                svc.config["auto_check"] = False
+            elif str(sid) in overrides and sv:
+                svc.config["_auto_check_enabled"] = True
+                svc.config["auto_check"] = True
+            else:
+                enabled = bool(auto_check_enabled_map.get(str(sid), False))
+                svc.config["_auto_check_enabled"] = enabled
+                svc.config["auto_check"] = enabled
 
     def _current_user() -> tuple[str, str, bool]:
         username = str(session.get("username") or "")
@@ -205,10 +240,21 @@ def create_app(engine: MonitorEngine, scheduler=None) -> Flask:
     def api_admin_schedules():
         if not _is_admin():
             return jsonify({"error": "forbidden"}), 403
+        auto_map = get_auto_check_enabled_map()
+        overrides = get_overrides()
         base: Dict[str, str] = {}
+        enabled: Dict[str, bool] = {}
         for sid, svc in engine.services.items():
-            base[str(sid)] = str(getattr(svc, "config", {}).get("check_schedule") or "").strip()
-        return jsonify({"overrides": get_overrides(), "base": base})
+            cfg = getattr(svc, "config", {}) if isinstance(getattr(svc, "config", None), dict) else {}
+            base[str(sid)] = str(cfg.get("_base_check_schedule") or cfg.get("check_schedule") or "").strip()
+            sv = str(overrides.get(str(sid)) or "").strip()
+            if sv.lower() in ("off", "pause", "paused", "disabled", "disable"):
+                enabled[str(sid)] = False
+            elif str(sid) in overrides and sv:
+                enabled[str(sid)] = True
+            else:
+                enabled[str(sid)] = bool(auto_map.get(str(sid), False))
+        return jsonify({"overrides": overrides, "base": base, "enabled": enabled})
 
     @app.put("/api/admin/schedules")
     def api_admin_set_schedule():
@@ -228,6 +274,8 @@ def create_app(engine: MonitorEngine, scheduler=None) -> Flask:
         if schedule_str and schedule_str.lower() in ("off", "pause", "paused", "disabled", "disable"):
             set_override(sid, "off")
             if isinstance(getattr(svc, "config", None), dict):
+                set_auto_check_enabled(sid, False)
+                svc.config["_auto_check_enabled"] = False
                 svc.config["auto_check"] = False
             if scheduler is not None:
                 job_id = job_id_for_service(sid)
@@ -241,12 +289,16 @@ def create_app(engine: MonitorEngine, scheduler=None) -> Flask:
             parse_check_schedule(schedule_str, default_minutes=30)
             set_override(sid, schedule_str)
             if isinstance(getattr(svc, "config", None), dict):
+                set_auto_check_enabled(sid, True)
                 svc.config["check_schedule"] = schedule_str
+                svc.config["_auto_check_enabled"] = True
                 svc.config["auto_check"] = True
         else:
             set_override(sid, "")
             if isinstance(getattr(svc, "config", None), dict):
+                set_auto_check_enabled(sid, True)
                 svc.config["check_schedule"] = str(svc.config.get(base_key) or "").strip()
+                svc.config["_auto_check_enabled"] = True
                 svc.config["auto_check"] = True
 
         if scheduler is not None and bool(getattr(svc, "config", {}).get("auto_check", True)):
@@ -270,6 +322,23 @@ def create_app(engine: MonitorEngine, scheduler=None) -> Flask:
                 **spec.kwargs,
             )
 
+        return jsonify({"success": True, "message": "ok"})
+
+    @app.put("/api/admin/failure_policy")
+    def api_admin_set_failure_policy():
+        if not _is_admin():
+            return jsonify({"error": "forbidden"}), 403
+        payload = request.get_json(silent=True) or {}
+        sid = str(payload.get("service_id") or "").strip()
+        auto_restart = bool(payload.get("auto_restart"))
+        if sid not in engine.services:
+            return jsonify({"success": False, "message": "service_not_found"}), 400
+        mode = "restart" if auto_restart else "alert"
+        set_policy(sid, mode)
+        svc = engine.services[sid]
+        if isinstance(getattr(svc, "config", None), dict):
+            svc.config["on_failure"] = mode
+            svc.config["auto_fix"] = True if mode == "restart" else False
         return jsonify({"success": True, "message": "ok"})
 
     @app.get("/api/admin/disabled")
@@ -328,6 +397,8 @@ def create_app(engine: MonitorEngine, scheduler=None) -> Flask:
         page_size = int(request.args.get("page_size") or 5)
 
         overrides = get_overrides()
+        auto_map = get_auto_check_enabled_map()
+        failure_policies = get_policies()
         services = [s.get_info() for s in engine.services.values()]
         services.sort(key=lambda x: str(x.get("id") or ""))
         if role != "admin":
@@ -339,11 +410,20 @@ def create_app(engine: MonitorEngine, scheduler=None) -> Flask:
                     s["can_restart"] = False
         for s in services:
             sid = str(s.get("id") or "")
-            if sid in overrides:
-                v = str(overrides[sid] or "").strip()
+            v = str(overrides.get(sid) or "").strip()
+            if sid in overrides and v:
                 s["check_schedule"] = v
-                if v.lower() in ("off", "pause", "paused", "disabled", "disable"):
-                    s["auto_check"] = False
+            if v.lower() in ("off", "pause", "paused", "disabled", "disable"):
+                s["auto_check"] = False
+            elif sid in overrides and v:
+                s["auto_check"] = True
+            else:
+                s["auto_check"] = bool(auto_map.get(sid, False))
+
+            pol = str(failure_policies.get(sid) or "").strip().lower()
+            if pol in ("alert", "restart"):
+                s["on_failure"] = pol
+                s["auto_restart"] = True if pol == "restart" else False
 
         if q:
             def _hit(x: dict) -> bool:

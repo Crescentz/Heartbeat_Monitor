@@ -40,7 +40,9 @@ if __name__ == '__main__':
     log = logging.getLogger("heartbeat_monitor")
 
     from core.check_schedule import job_id_for_service, parse_check_schedule
+    from core.auto_check_store import get_auto_check_enabled_map, seed_auto_check_enabled
     from core.disabled_service_store import get_disabled_map
+    from core.failure_policy_store import get_policies
     from core.ops_mode_store import get_ops_enabled_map, seed_ops_enabled, set_ops_enabled
     from core.schedule_override_store import get_overrides
     from core.monitor_engine import MonitorEngine
@@ -57,6 +59,19 @@ if __name__ == '__main__':
     disabled_map = get_disabled_map()
     seed_ops_enabled(sorted(list(engine.services.keys())), default_enabled=True)
     ops_enabled_map = get_ops_enabled_map()
+    initial_auto_check = {}
+    for sid, svc in engine.services.items():
+        cfg = getattr(svc, "config", {}) if isinstance(getattr(svc, "config", None), dict) else {}
+        sv = str(overrides.get(str(sid)) or "").strip().lower()
+        if sv in ("off", "pause", "paused", "disabled", "disable"):
+            initial_auto_check[str(sid)] = False
+        elif str(sid) in overrides and bool(sv):
+            initial_auto_check[str(sid)] = True
+        else:
+            initial_auto_check[str(sid)] = bool(cfg.get("auto_check", True))
+    seed_auto_check_enabled(sorted(list(engine.services.keys())), default_enabled=True, initial_map=initial_auto_check)
+    auto_check_enabled_map = get_auto_check_enabled_map()
+    failure_policies = get_policies()
     for service_id, svc in engine.services.items():
         if isinstance(getattr(svc, "config", None), dict) and "_base_check_schedule" not in svc.config:
             svc.config["_base_check_schedule"] = str(svc.config.get("check_schedule") or "").strip()
@@ -68,14 +83,26 @@ if __name__ == '__main__':
                 set_ops_enabled(sid, True)
                 ops_enabled_map[sid] = True
             svc.config["_ops_enabled"] = bool(ops_enabled_map.get(sid, False))
+            policy = str(failure_policies.get(sid) or "").strip().lower()
+            if policy == "alert":
+                svc.config["on_failure"] = "alert"
+                svc.config["auto_fix"] = False
+            elif policy == "restart":
+                svc.config["on_failure"] = "restart"
+                svc.config["auto_fix"] = True
         if bool(getattr(svc, "config", {}).get("_disabled", False)):
             continue
         schedule_value = str(overrides.get(str(service_id)) or "").strip()
         if schedule_value.lower() in ("off", "pause", "paused", "disabled", "disable"):
             if isinstance(getattr(svc, "config", None), dict):
+                svc.config["_auto_check_enabled"] = False
                 svc.config["auto_check"] = False
             continue
-        if not bool(getattr(svc, "config", {}).get("auto_check", True)):
+        enabled = True if (str(service_id) in overrides and bool(schedule_value)) else bool(auto_check_enabled_map.get(str(service_id), False))
+        if isinstance(getattr(svc, "config", None), dict):
+            svc.config["_auto_check_enabled"] = enabled
+            svc.config["auto_check"] = enabled
+        if not enabled:
             continue
         schedule_value = overrides.get(str(service_id)) or getattr(svc, "config", {}).get("check_schedule")
         spec = parse_check_schedule(schedule_value, default_minutes=30)
