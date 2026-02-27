@@ -78,6 +78,53 @@ def create_app(engine: MonitorEngine, scheduler=None) -> Flask:
     def _is_admin() -> bool:
         return str(session.get("role") or "") == "admin"
 
+    def _parse_int_arg(name: str, default: int, minimum: int, maximum: int) -> int:
+        """
+        安全解析整数查询参数。
+        用户传入非法值时回退默认值，并做上下界约束，避免触发 500。
+        """
+        raw = request.args.get(name)
+        if raw is None:
+            return default
+        try:
+            val = int(str(raw).strip())
+        except Exception:
+            return default
+        return min(max(val, minimum), maximum)
+
+    def _mark_for_action_state(state: str) -> str:
+        s = str(state or "").strip().lower()
+        if s == "ok":
+            return "√"
+        if s == "partial":
+            return "-"
+        return "x"
+
+    def _action_state_for_service(info: dict, action: str, user_can_control: bool) -> str:
+        """
+        计算服务动作三态：
+        - ok: 当前可执行（√）
+        - partial: 当前动作缺少 YAML 命令/脚本（-）
+        - blocked: 其余不可执行场景（x）
+        """
+        _ = user_can_control  # 当前三态主要表达动作配置与可执行结果，保留参数以兼容调用处
+        a = str(action or "").strip().lower()
+        disabled = bool(info.get("disabled"))
+        if a == "check":
+            return "blocked" if disabled else "ok"
+
+        if disabled:
+            return "blocked"
+
+        # start/stop/restart：只要该动作没配置命令/脚本，都统一显示为 "-"
+        # 让用户第一眼区分“配置缺失(-)”和“不可执行(x)”。
+        if not bool(info.get(f"{a}_capable")):
+            return "partial"
+
+        if bool(info.get(f"can_{a}")):
+            return "ok"
+        return "blocked"
+
     @app.get("/")
     def index():
         username, role, can_control = _current_user()
@@ -254,6 +301,8 @@ def create_app(engine: MonitorEngine, scheduler=None) -> Flask:
             return jsonify({"error": "forbidden"}), 403
         payload = request.get_json(silent=True) or {}
         sid = str(payload.get("service_id") or "").strip()
+        if sid not in engine.services:
+            return jsonify({"success": False, "message": "service_not_found"}), 400
         users = payload.get("users") if isinstance(payload.get("users"), list) else []
         set_service_users(sid, [str(x) for x in users])
         return jsonify({"success": True, "message": "ok"})
@@ -306,7 +355,10 @@ def create_app(engine: MonitorEngine, scheduler=None) -> Flask:
             return jsonify({"success": True, "message": "ok"})
 
         if schedule_str:
-            parse_check_schedule(schedule_str, default_minutes=30)
+            try:
+                parse_check_schedule(schedule_str, default_minutes=30, strict=True)
+            except Exception:
+                return jsonify({"success": False, "message": "invalid_check_schedule"}), 400
             set_override(sid, schedule_str)
             if isinstance(getattr(svc, "config", None), dict):
                 set_auto_check_enabled(sid, True)
@@ -415,13 +467,14 @@ def create_app(engine: MonitorEngine, scheduler=None) -> Flask:
     def api_services():
         username, role, can_control = _current_user()
         allowed = set(allowed_service_ids(username, role, list(engine.services.keys())))
+        user_can_control = (role == "admin") or bool(can_control)
         q = str(request.args.get("q") or "").strip().lower()
         category = str(request.args.get("category") or "").strip().lower()
         on_failure = str(request.args.get("on_failure") or "").strip().lower()
         status = str(request.args.get("status") or "").strip().lower()
         only_failed = str(request.args.get("only_failed") or "").strip().lower() in ("1", "true", "yes", "on")
-        page = int(request.args.get("page") or 1)
-        page_size = int(request.args.get("page_size") or 5)
+        page = _parse_int_arg("page", default=1, minimum=1, maximum=1000000)
+        page_size = _parse_int_arg("page_size", default=5, minimum=1, maximum=200)
 
         overrides = get_overrides()
         auto_map = get_auto_check_enabled_map()
@@ -449,6 +502,12 @@ def create_app(engine: MonitorEngine, scheduler=None) -> Flask:
             if pol in ("alert", "restart"):
                 s["on_failure"] = pol
                 s["auto_restart"] = True if pol == "restart" else False
+            s["auto_restart_effective"] = bool(s.get("auto_restart")) and bool(s.get("restart_capable")) and bool(s.get("ops_enabled")) and (not bool(s.get("disabled")))
+
+            for action in ("start", "stop", "restart", "check"):
+                state = _action_state_for_service(s, action, user_can_control=user_can_control)
+                s[f"action_state_{action}"] = state
+                s[f"action_mark_{action}"] = _mark_for_action_state(state)
 
         if q:
             def _hit(x: dict) -> bool:
@@ -469,8 +528,6 @@ def create_app(engine: MonitorEngine, scheduler=None) -> Flask:
             services = [s for s in services if str(s.get("status") or "") == "Error"]
 
         total = len(services)
-        page = max(page, 1)
-        page_size = min(max(page_size, 1), 200)
         start = (page - 1) * page_size
         end = start + page_size
         items = services[start:end]
@@ -491,13 +548,15 @@ def create_app(engine: MonitorEngine, scheduler=None) -> Flask:
         username, role, _ = _current_user()
         allowed = set(allowed_service_ids(username, role, list(engine.services.keys())))
         service_id = str(request.args.get("service_id") or "").strip() or None
-        retention_days = int(request.args.get("days") or 7)
-        retention_days = min(max(retention_days, 1), 90)
-        page = max(int(request.args.get("page") or 1), 1)
-        page_size = min(max(int(request.args.get("page_size") or 10), 1), 200)
+        retention_days = _parse_int_arg("days", default=7, minimum=1, maximum=90)
+        page = _parse_int_arg("page", default=1, minimum=1, maximum=1000000)
+        page_size = _parse_int_arg("page_size", default=10, minimum=1, maximum=200)
         n = request.args.get("n")
         if n is not None:
-            nn = min(max(int(n), 1), 200)
+            try:
+                nn = min(max(int(str(n).strip()), 1), 200)
+            except Exception:
+                nn = 10
             items = tail_errors(nn, retention_days=retention_days)
             if role != "admin":
                 items = [e for e in items if str(e.get("service_id") or "") in allowed]
@@ -533,13 +592,15 @@ def create_app(engine: MonitorEngine, scheduler=None) -> Flask:
         username, role, _ = _current_user()
         allowed = set(allowed_service_ids(username, role, list(engine.services.keys())))
         service_id = str(request.args.get("service_id") or "").strip() or None
-        retention_days = int(request.args.get("days") or 7)
-        retention_days = min(max(retention_days, 1), 90)
-        page = max(int(request.args.get("page") or 1), 1)
-        page_size = min(max(int(request.args.get("page_size") or 30), 1), 200)
+        retention_days = _parse_int_arg("days", default=7, minimum=1, maximum=90)
+        page = _parse_int_arg("page", default=1, minimum=1, maximum=1000000)
+        page_size = _parse_int_arg("page_size", default=30, minimum=1, maximum=200)
         n = request.args.get("n")
         if n is not None:
-            nn = min(max(int(n), 1), 500)
+            try:
+                nn = min(max(int(str(n).strip()), 1), 500)
+            except Exception:
+                nn = 30
             items = tail_events(nn, retention_days=retention_days)
             if role != "admin":
                 items = [e for e in items if str(e.get("service_id") or "") in allowed]
@@ -572,15 +633,20 @@ def create_app(engine: MonitorEngine, scheduler=None) -> Flask:
 
     @app.post("/api/control/<service_id>/<action>")
     def api_control(service_id: str, action: str):
+        action = str(action or "").strip().lower()
         username, role, can_control = _current_user()
         allowed = set(allowed_service_ids(username, role, list(engine.services.keys())))
         if role != "admin" and service_id not in allowed:
             return jsonify({"success": False, "message": "forbidden"}), 403
+        if action not in ("start", "stop", "restart", "check"):
+            return jsonify({"success": False, "message": "unsupported_action"}), 400
         if action in ("start", "stop", "restart") and role != "admin" and not can_control:
             return jsonify({"success": False, "message": "control_not_authorized"}), 403
         allow_fix = True if role == "admin" or can_control else False
         ok, msg = engine.control(service_id, action, allow_fix=allow_fix)
-        return jsonify({"success": ok, "message": msg})
+        if not ok and msg == "Service not found":
+            return jsonify({"success": False, "message": "service_not_found"}), 404
+        return jsonify({"success": ok, "message": msg}), (200 if ok else 400)
 
     return app
 

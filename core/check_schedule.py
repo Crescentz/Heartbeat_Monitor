@@ -16,7 +16,18 @@ def job_id_for_service(service_id: str) -> str:
     return "check_" + safe
 
 
-def parse_check_schedule(value: Any, default_minutes: int = 30) -> ScheduleSpec:
+def parse_check_schedule(value: Any, default_minutes: int = 30, strict: bool = False) -> ScheduleSpec:
+    """
+    解析服务检查频率，转换为 APScheduler 触发器配置。
+
+    支持格式：
+    - "<n>s" / "<n>m" / "<n>h"
+    - "daily@HH:MM"
+    - "weekly@mon HH:MM"（星期字段遵循 APScheduler day_of_week）
+
+    strict=False：非法值回退为默认分钟间隔。
+    strict=True：非法值直接抛出 ValueError，便于接口层返回 400。
+    """
     if value is None:
         return ScheduleSpec("interval", {"minutes": int(default_minutes)})
     if isinstance(value, (int, float)):
@@ -48,6 +59,8 @@ def parse_check_schedule(value: Any, default_minutes: int = 30) -> ScheduleSpec:
             h, m = _parse_hhmm(parts[1])
             return ScheduleSpec("cron", {"day_of_week": dow, "hour": h, "minute": m})
 
+    if strict:
+        raise ValueError(f"invalid_check_schedule: {value!r}")
     return ScheduleSpec("interval", {"minutes": int(default_minutes)})
 
 
@@ -61,4 +74,3 @@ def _parse_hhmm(hhmm: str) -> Tuple[int, int]:
     h = min(max(h, 0), 23)
     m = min(max(m, 0), 59)
     return h, m
-

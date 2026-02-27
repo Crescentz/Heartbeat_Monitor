@@ -31,10 +31,18 @@ class LocalProcService(BaseService):
         can_start, can_stop, can_restart = self._capabilities()
         disabled = bool(getattr(self, "config", {}).get("_disabled", False))
         ops_enabled = bool(getattr(self, "config", {}).get("_ops_enabled", False))
+        on_failure = str(getattr(self, "config", {}).get("on_failure") or "alert").lower()
+        auto_fix = bool(getattr(self, "config", {}).get("auto_fix", True))
+        auto_restart = (on_failure == "restart") and auto_fix
         info["ops_capable"] = bool(can_start or can_stop or can_restart)
+        info["start_capable"] = can_start
+        info["stop_capable"] = can_stop
+        info["restart_capable"] = can_restart
         info["can_start"] = can_start and (not disabled) and ops_enabled
         info["can_stop"] = can_stop and (not disabled) and ops_enabled
         info["can_restart"] = can_restart and (not disabled) and ops_enabled
+        info["auto_restart"] = auto_restart
+        info["auto_restart_effective"] = auto_restart and can_restart and ops_enabled and (not disabled)
         return info
 
     def check_health(self) -> Tuple[bool, str, Dict[str, Any]]:

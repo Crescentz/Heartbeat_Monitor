@@ -4,5 +4,6 @@
   "mineru_01": true,
   "mineru_prod": true,
   "office_to_pdf": false,
-  "umi_ocr": true
+  "umi_ocr": true,
+  "xinference_xinf": false
 }

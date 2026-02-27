@@ -6,6 +6,7 @@
     "local_alert_demo": "30s",
     "mineru_prod": "5m",
     "office_to_pdf": "off",
-    "umi_ocr": "1m"
+    "umi_ocr": "1m",
+    "xinference_xinf": "off"
   }
 }

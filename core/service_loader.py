@@ -33,6 +33,7 @@ def load_services_from_dir(config_dir: str = os.path.join("config", "services"))
             service_id = os.path.splitext(os.path.basename(path))[0]
             services.append(InvalidService(service_id, f"YAML解析失败: {e}", config_path=path))
             continue
+
         items: List[Dict[str, Any]]
         if isinstance(data, list):
             items = data
@@ -104,4 +105,3 @@ def _load_plugin_service(plugin: str, service_id: str, cfg: Dict[str, Any], conf
     if not hasattr(module, "create_service"):
         raise RuntimeError(f"services.{plugin}_service must expose create_service(service_id, cfg, config_path)")
     return module.create_service(service_id, cfg, config_path)
-

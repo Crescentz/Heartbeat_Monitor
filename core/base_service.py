@@ -3,6 +3,7 @@ from datetime import datetime
 import threading
 from typing import Any, Dict, List, Optional
 
+
 class BaseService(ABC):
     def __init__(self, service_id, name, description, config, config_path: Optional[str] = None):
         self.service_id = service_id
@@ -25,7 +26,7 @@ class BaseService(ABC):
             self.last_check = datetime.now()
             if detail is not None:
                 self.last_test_detail = detail
-            
+
             if is_healthy:
                 self.status = "Running"
                 self.last_error = ""
@@ -42,18 +43,25 @@ class BaseService(ABC):
         if self.uptime_start:
             delta = datetime.now() - self.uptime_start
             uptime_str = str(delta).split('.')[0]
-            
+
         failure_rate = 0
         if self.total_checks > 0:
             failure_rate = round((self.failure_count / self.total_checks) * 100, 2)
 
         config = self.config if isinstance(self.config, dict) else {}
-        start_cmds = config.get("start_cmds")
-        stop_cmds = config.get("stop_cmds")
-        restart_cmds = config.get("restart_cmds")
-        has_start = bool(config.get("start_cmd") or (isinstance(start_cmds, list) and len(start_cmds) > 0))
-        has_stop = bool(config.get("stop_cmd") or (isinstance(stop_cmds, list) and len(stop_cmds) > 0))
-        has_restart = bool(config.get("restart_cmd") or (isinstance(restart_cmds, list) and len(restart_cmds) > 0))
+        def _collect_cmds(single_key: str, multi_key: str) -> List[str]:
+            if isinstance(config.get(multi_key), list):
+                return [str(x) for x in config.get(multi_key) if str(x).strip()]
+            v = str(config.get(single_key) or "").strip()
+            return [v] if v else []
+
+        # 统一用“去空白后的有效命令”判定能力，避免空字符串被误判为可执行。
+        start_cmds = _collect_cmds("start_cmd", "start_cmds")
+        stop_cmds = _collect_cmds("stop_cmd", "stop_cmds")
+        restart_cmds = _collect_cmds("restart_cmd", "restart_cmds")
+        has_start = bool(start_cmds)
+        has_stop = bool(stop_cmds)
+        has_restart = bool(restart_cmds)
         ops_capable = has_start or has_stop or has_restart
 
         category = str(config.get("category") or config.get("service_type") or "api").lower()
@@ -64,13 +72,8 @@ class BaseService(ABC):
         base_check_schedule = str(config.get("_base_check_schedule") or "").strip()
         disabled = bool(config.get("_disabled", False))
         ops_enabled = bool(config.get("_ops_enabled", False))
+        auto_restart_effective = auto_restart and has_restart and ops_enabled and (not disabled)
         ops_doc = config.get("ops_doc")
-
-        def _collect_cmds(single_key: str, multi_key: str) -> List[str]:
-            if isinstance(config.get(multi_key), list):
-                return [str(x) for x in config.get(multi_key) if str(x).strip()]
-            v = str(config.get(single_key) or "").strip()
-            return [v] if v else []
 
         return {
             "id": self.service_id,
@@ -85,6 +88,7 @@ class BaseService(ABC):
             "auto_check": auto_check,
             "on_failure": on_failure,
             "auto_restart": auto_restart,
+            "auto_restart_effective": auto_restart_effective,
             "check_schedule": check_schedule,
             "base_check_schedule": base_check_schedule,
             "disabled": disabled,
@@ -106,25 +110,29 @@ class BaseService(ABC):
             "restart_cmds": _collect_cmds("restart_cmd", "restart_cmds"),
         }
 
-    # ===== 扩展点@服务接口：新增服务必须实现以下 3 个操作与健康检测 =====
     @abstractmethod
     def check_health(self):
         """
-        Returns: (bool, str, dict) -> (ok, message, detail)
+        服务健康检查接口约定。
+
+        返回值：
+          (ok, message, detail)
+        示例：
+          return True, "", {"ok": True, "status_code": 200, "elapsed_ms": 123}
         """
         pass
 
-    # ===== 扩展点@服务接口 =====
     @abstractmethod
     def start_service(self):
+        """启动服务进程/容器。"""
         pass
 
-    # ===== 扩展点@服务接口 =====
     @abstractmethod
     def stop_service(self):
+        """停止服务进程/容器。"""
         pass
-    
-    # ===== 扩展点@服务接口 =====
+
     @abstractmethod
     def restart_service(self):
+        """重启服务进程/容器。"""
         pass
