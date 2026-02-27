@@ -1,18 +1,15 @@
 services:
   - enabled: true
     id: "local_restart_demo"
-    name: "本机自动重启样例服务"
+    name: "本机失败重启样例服务"
     description: "示例：本机服务（18081）。可在页面点“启动”后启动本机示例 API"
     category: "api"
     auto_check: true
     check_schedule: "10s"
     on_failure: "restart"
     auto_fix: true
-    post_auto_restart_check_delay_s: 5
-    post_control_check_delay_s: 1
     plugin: "localproc"
     ops_default_enabled: true
-    start_restart_on_running: true
 
     host: "127.0.0.1"
     test_api: "http://127.0.0.1:18081/health"
@@ -41,8 +38,8 @@ services:
 
   - enabled: true
     id: "local_alert_demo"
-    name: "本机失败告警样例服务"
-    description: "示例：本机服务（18080）。失败策略=失败告警，不自动重启"
+    name: "本机仅提示样例服务"
+    description: "示例：本机服务（18080）。失败策略=仅提示，不自动重启"
     category: "api"
     auto_check: true
     check_schedule: "10s"
@@ -59,7 +56,7 @@ services:
     ops_doc:
       monitor: "本机健康检查：访问 /health，JSON ok=true 则认为正常。"
       start_steps:
-        - "该样例为“失败告警+只监控”：不提供启停/重启按钮；如需验证告警，请手工运行 local_test_service.py"
+        - "该样例为“仅提示+只监控”：不提供启停/重启按钮；如需验证告警，请手工运行 local_test_service.py"
       troubleshooting:
         - "确认本机已运行 local_test_service.py（127.0.0.1:18080）"
       contacts: []

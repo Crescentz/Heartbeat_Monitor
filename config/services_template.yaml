@@ -17,12 +17,10 @@ host: "被监控服务器IP或域名"
 
 # ===== 1) 分类与检测（适用于所有服务）=====
 category: "api"  # 可选: api/web/other，用于界面分类展示
-auto_check: false  # 兼容字段：实际是否自动检测以页面“自动检测”开关为准；新纳管服务默认关闭
+auto_check: true
 check_schedule: "30m"  # 10s/5m/1h/daily@02:30/weekly@mon 03:00；也可在管理界面填 off 关闭自动检测
-on_failure: "alert"  # alert=失败告警；restart=失败后自动重启（需要运维方式可用）
+on_failure: "alert"  # alert=仅提示；restart=失败后自动重启（需要运维方式可用）
 auto_fix: true
-post_control_check_delay_s: 0  # 可选：手工启动/重启后延迟复检（用于“启动需要缓冲时间”的服务；上限 120s）
-post_auto_restart_check_delay_s: 5  # 可选：自动重启后延迟复检（上限 120s）
 
 plugin: ""  # 留空=GenericService；localproc=本机运维；mineru=插件示例
 
