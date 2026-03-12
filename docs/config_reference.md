@@ -28,14 +28,14 @@
 - `sudo`：是否使用 sudo 执行命令（仅命令执行时生效；默认 true/false 以模板为准）
 - `service_type`：标注用途（docker/systemd/custom），目前仅用于阅读，不影响逻辑
 - `category`：服务类别（api/web/other），用于界面分类展示
-- `auto_check`：YAML 默认值（兼容旧配置）。实际是否参与定时检测以页面“自动检测”开关为准（持久化在 `data/service_auto_check.json`）；新纳管服务默认先不参与定时检测
+- `auto_check`：YAML 初始值。实际是否参与定时检测以页面“自动检测”开关为准（持久化在 `data/service_auto_check.json`）；若字段缺失，则新纳管服务默认先不参与定时检测
 - `check_schedule`：检测频率（可选；默认 30m）。支持：`10s`、`5m`、`1h`、`daily@02:30`、`weekly@mon 03:00`；管理界面也支持填 `off` 关闭自动检测（并会自动保存）
 - `on_failure`：失败策略（alert=失败告警；restart=失败后自动重启）
 - `auto_fix`：当 on_failure=restart 时是否执行自动处理（默认 true）
 - `post_control_check_delay_s`：手工启动/重启后，延迟多少秒再做一次复检（用于“服务启动需要缓冲时间”的场景；上限 120s）
 - `post_auto_restart_check_delay_s`：自动重启后，延迟多少秒再做一次复检（用于“服务重启后需要缓冲时间”的场景；上限 120s；默认 5s）
 - `ops_doc`：服务运维文档（可选）。前端点击“运维文档”会按固定模板展示（见 services_template.yaml）
-- 服务级“只监控/可维护”开关：该开关由前端超管操作持久化（不在 YAML 里写），存储在 `data/service_ops_mode.json`。切到“只监控”后任何人都不能启停/重启，且失败不会自动重启；该文件首次生成时会把当时已加载的服务默认设为“可维护”，之后新增的服务若未显式设置则默认按“只监控”处理，需超管手动切换为“可维护”
+- 服务级“只监控/可维护”开关：该开关由前端超管操作持久化（不在 YAML 里写），存储在 `data/service_ops_mode.json`。切到“只监控”后任何人都不能启停/重启，且失败不会自动重启；该文件首次生成时会按该服务的 `ops_default_enabled` 初始化，之后新增的服务若未显式设置则默认按“只监控”处理，需超管手动切换为“可维护”
 
 ### 1.1 SSH 私钥怎么配置（推荐）
 建议使用 `ssh_private_key_path` 引用私钥文件路径，不要把私钥内容写进 YAML（避免泄露）。

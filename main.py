@@ -1,6 +1,8 @@
 import logging
+import os
 import sys
 import threading
+
 
 def _setup_logging() -> None:
     fmt = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
@@ -23,30 +25,60 @@ def _setup_logging() -> None:
 
 def _import_optional_deps() -> None:
     try:
-        import flask
-        import apscheduler
-        import paramiko
-        import requests
-        import yaml
+        import apscheduler  # noqa: F401
+        import flask  # noqa: F401
+        import paramiko  # noqa: F401
+        import requests  # noqa: F401
+        import yaml  # noqa: F401
     except Exception:
-        print("缺少依赖，先执行：python -m pip install -r requirements.txt", file=sys.stderr)
+        print("Missing dependencies, run: python -m pip install -r requirements.txt", file=sys.stderr)
         raise
 
-if __name__ == '__main__':
+
+def _env_flag(name: str, default: bool = False) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return str(raw).strip().lower() in ("1", "true", "yes", "on")
+
+
+def _env_port(name: str, default: int) -> int:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        port = int(str(raw).strip())
+    except Exception:
+        return default
+    if 1 <= port <= 65535:
+        return port
+    return default
+
+
+if __name__ == "__main__":
     _import_optional_deps()
+    from apscheduler.schedulers.background import BackgroundScheduler
+
+    from core.auto_check_store import get_auto_check_enabled_map, seed_auto_check_enabled, set_auto_check_enabled
+    from core.check_schedule import job_id_for_service, parse_check_schedule
+    from core.disabled_service_store import get_disabled_map
+    from core.failure_policy_store import get_policies
+    from core.monitor_engine import MonitorEngine
+    from core.ops_mode_store import get_ops_enabled_map, seed_ops_enabled, set_ops_enabled
+    from core.runtime_state import (
+        apply_runtime_service_flags,
+        backfill_bool_store,
+        build_initial_auto_check_map,
+        build_initial_ops_map,
+    )
+    from core.schedule_override_store import get_overrides
+    from core.service_loader import load_services_from_dir
     from core.storage import ensure_dirs
+    from monitor.webapp import create_app
+
     ensure_dirs()
     _setup_logging()
     log = logging.getLogger("heartbeat_monitor")
-
-    from core.check_schedule import job_id_for_service, parse_check_schedule
-    from core.disabled_service_store import get_disabled_map
-    from core.ops_mode_store import get_ops_enabled_map, seed_ops_enabled, set_ops_enabled
-    from core.schedule_override_store import get_overrides
-    from core.monitor_engine import MonitorEngine
-    from core.service_loader import load_services_from_dir
-    from apscheduler.schedulers.background import BackgroundScheduler
-    from monitor.webapp import create_app
 
     services = load_services_from_dir()
     engine = MonitorEngine(services)
@@ -55,25 +87,23 @@ if __name__ == '__main__':
     scheduler = BackgroundScheduler()
     overrides = get_overrides()
     disabled_map = get_disabled_map()
-    seed_ops_enabled(sorted(list(engine.services.keys())), default_enabled=True)
-    ops_enabled_map = get_ops_enabled_map()
+    initial_ops = build_initial_ops_map(engine.services)
+    seed_ops_enabled(sorted(list(engine.services.keys())), default_enabled=False, initial_map=initial_ops)
+    ops_enabled_map = backfill_bool_store(get_ops_enabled_map(), initial_ops, set_ops_enabled)
+    initial_auto_check = build_initial_auto_check_map(engine.services, overrides)
+    seed_auto_check_enabled(sorted(list(engine.services.keys())), default_enabled=False, initial_map=initial_auto_check)
+    auto_check_enabled_map = backfill_bool_store(get_auto_check_enabled_map(), initial_auto_check, set_auto_check_enabled)
+    failure_policies = get_policies()
+    apply_runtime_service_flags(
+        engine.services,
+        overrides=overrides,
+        disabled_map=disabled_map,
+        ops_enabled_map=ops_enabled_map,
+        auto_check_enabled_map=auto_check_enabled_map,
+        failure_policies=failure_policies,
+    )
     for service_id, svc in engine.services.items():
-        if isinstance(getattr(svc, "config", None), dict) and "_base_check_schedule" not in svc.config:
-            svc.config["_base_check_schedule"] = str(svc.config.get("check_schedule") or "").strip()
-        if isinstance(getattr(svc, "config", None), dict) and disabled_map.get(str(service_id)):
-            svc.config["_disabled"] = True
-        if isinstance(getattr(svc, "config", None), dict):
-            sid = str(service_id)
-            if sid not in ops_enabled_map and bool(svc.config.get("ops_default_enabled", False)):
-                set_ops_enabled(sid, True)
-                ops_enabled_map[sid] = True
-            svc.config["_ops_enabled"] = bool(ops_enabled_map.get(sid, False))
         if bool(getattr(svc, "config", {}).get("_disabled", False)):
-            continue
-        schedule_value = str(overrides.get(str(service_id)) or "").strip()
-        if schedule_value.lower() in ("off", "pause", "paused", "disabled", "disable"):
-            if isinstance(getattr(svc, "config", None), dict):
-                svc.config["auto_check"] = False
             continue
         if not bool(getattr(svc, "config", {}).get("auto_check", True)):
             continue
@@ -95,6 +125,10 @@ if __name__ == '__main__':
 
     engine.scheduler = scheduler
     app = create_app(engine, scheduler=scheduler)
-    log.info("Web UI: http://127.0.0.1:60005/")
+    host = str(os.getenv("HBM_HOST") or "0.0.0.0").strip() or "0.0.0.0"
+    port = _env_port("HBM_PORT", 60005)
+    debug = _env_flag("HBM_DEBUG", default=False)
+    display_host = host if host not in ("0.0.0.0", "::") else "127.0.0.1"
+    log.info("Web UI: http://%s:%s/", display_host, port)
     threading.Thread(target=engine.check_all, daemon=True).start()
-    app.run(host="0.0.0.0", port=60005, debug=True, use_reloader=False)
+    app.run(host=host, port=port, debug=debug, use_reloader=False)

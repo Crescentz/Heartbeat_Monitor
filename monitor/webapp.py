@@ -17,6 +17,12 @@ from core.user_store import create_user, delete_user, ensure_default_admin, get_
 from core.error_log import query_errors, tail_errors
 from core.event_log import query_events, tail_events
 from core.monitor_engine import MonitorEngine
+from core.runtime_state import (
+    apply_runtime_service_flags,
+    backfill_bool_store,
+    build_initial_auto_check_map,
+    build_initial_ops_map,
+)
 from core.app_info import APP_INFO
 
 
@@ -31,41 +37,22 @@ def create_app(engine: MonitorEngine, scheduler=None) -> Flask:
     app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax")
     created_admin = ensure_default_admin()
     disabled_map = get_disabled_map()
-    seed_ops_enabled(sorted(list(engine.services.keys())), default_enabled=True)
-    ops_enabled_map = get_ops_enabled_map()
     overrides = get_overrides()
-    initial_auto_check = {}
-    for sid, svc in engine.services.items():
-        cfg = getattr(svc, "config", {}) if isinstance(getattr(svc, "config", None), dict) else {}
-        sv = str(overrides.get(str(sid)) or "").strip().lower()
-        if sv in ("off", "pause", "paused", "disabled", "disable"):
-            initial_auto_check[str(sid)] = False
-        else:
-            initial_auto_check[str(sid)] = bool(cfg.get("auto_check", False))
+    initial_ops = build_initial_ops_map(engine.services)
+    seed_ops_enabled(sorted(list(engine.services.keys())), default_enabled=False, initial_map=initial_ops)
+    ops_enabled_map = backfill_bool_store(get_ops_enabled_map(), initial_ops, set_ops_enabled)
+    initial_auto_check = build_initial_auto_check_map(engine.services, overrides)
     seed_auto_check_enabled(sorted(list(engine.services.keys())), default_enabled=False, initial_map=initial_auto_check)
-    auto_check_enabled_map = get_auto_check_enabled_map()
+    auto_check_enabled_map = backfill_bool_store(get_auto_check_enabled_map(), initial_auto_check, set_auto_check_enabled)
     failure_policies = get_policies()
-    for sid, svc in engine.services.items():
-        if isinstance(getattr(svc, "config", None), dict) and disabled_map.get(str(sid)):
-            svc.config["_disabled"] = True
-        if isinstance(getattr(svc, "config", None), dict):
-            svc.config["_ops_enabled"] = bool(ops_enabled_map.get(str(sid), False))
-            policy = str(failure_policies.get(str(sid)) or "").strip().lower()
-            if policy == "alert":
-                svc.config["on_failure"] = "alert"
-                svc.config["auto_fix"] = False
-            elif policy == "restart":
-                svc.config["on_failure"] = "restart"
-                svc.config["auto_fix"] = True
-
-            sv = str(overrides.get(str(sid)) or "").strip()
-            if sv.lower() in ("off", "pause", "paused", "disabled", "disable"):
-                svc.config["_auto_check_enabled"] = False
-                svc.config["auto_check"] = False
-            else:
-                enabled = bool(auto_check_enabled_map.get(str(sid), False))
-                svc.config["_auto_check_enabled"] = enabled
-                svc.config["auto_check"] = enabled
+    apply_runtime_service_flags(
+        engine.services,
+        overrides=overrides,
+        disabled_map=disabled_map,
+        ops_enabled_map=ops_enabled_map,
+        auto_check_enabled_map=auto_check_enabled_map,
+        failure_policies=failure_policies,
+    )
 
     def _current_user() -> tuple[str, str, bool]:
         username = str(session.get("username") or "")
@@ -77,6 +64,10 @@ def create_app(engine: MonitorEngine, scheduler=None) -> Flask:
 
     def _is_admin() -> bool:
         return str(session.get("role") or "") == "admin"
+
+    @app.get("/favicon.ico")
+    def favicon():
+        return "", 204
 
     def _parse_int_arg(name: str, default: int, minimum: int, maximum: int) -> int:
         """
@@ -649,4 +640,3 @@ def create_app(engine: MonitorEngine, scheduler=None) -> Flask:
         return jsonify({"success": ok, "message": msg}), (200 if ok else 400)
 
     return app
-

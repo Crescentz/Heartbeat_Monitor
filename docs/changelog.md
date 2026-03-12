@@ -2,6 +2,15 @@
 
 作者：CC
 
+## v1.3.7（2026-03-12）
+- 后端：新增 `core/runtime_state.py` 统一运行时状态补齐，前后端对 `auto_check / ops_enabled / disabled / failure_policy` 的理解收敛到同一套逻辑。
+- 后端：新增服务补齐持久化状态时，`ops_enabled` 改为按服务自己的 `ops_default_enabled` 初始化；`auto_check` 对缺失字段默认关闭，和文档及部署预期一致。
+- 后端：`/favicon.ico` 返回 204，去掉登录页和主页控制台 404 噪音。
+- UI：自动刷新改为 5 秒，并在弹窗打开或标签页隐藏时暂停，减少操作干扰。
+- UI：页面补充“服务维护”按钮图例与自动刷新说明，降低管理员误解成本。
+- 测试：新增 `archive/dev_tools/__e2e_admin_common_ops.py`，覆盖启停、自动检测、自动重启、禁用和用户绑定。
+- 文档：README、维护手册、项目上下文、工具目录说明同步更新。
+
 ## v1.3.6（2026-02-27）
 - 后端：`/api/services` 新增动作三态字段 `action_state_*`（`ok/partial/blocked`）和符号字段 `action_mark_*`（`√/-/x`），并保留旧字段兼容。
 - 后端：统一动作三态判定逻辑（按当前用户权限、服务禁用状态、运维模式、动作能力）。

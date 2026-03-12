@@ -1,9 +1,23 @@
-# 样例配置（不自动加载）
+# 样例配置目录
 
-本目录存放**参考样例**，用于复制后按需修改。
+本目录仅存放参考样例，不会被程序自动加载。
 
-使用方式：
-1. 从本目录选择一个样例或从 `config/services_template.yaml` 复制
-2. 复制到 `config/services/` 目录下（该目录才会被程序自动加载）
-3. 按需修改后设置 `enabled: true`
+## 使用方式
+1. 选择一个最接近你场景的样例。
+2. 复制到 `config/services/`。
+3. 修改为真实内网地址、检测接口和运维命令。
+4. 再把 `enabled` 改为 `true`。
 
+## 样例选择建议
+- `api_only_sample.yaml`
+  - 只做 HTTP/API 监控，不提供启停能力。
+- `web_only_sample.yaml`
+  - 只看网页可达性或关键字。
+- `local_restart_demo.yaml`
+  - 本机自动重启演示。
+- `local_test_managed.yaml`
+  - 本机启停演示。
+- `example_service.yaml`
+  - 远端 SSH 命令与脚本式启停演示。
+- `mineru.yaml`
+  - 文件上传检测插件样例。

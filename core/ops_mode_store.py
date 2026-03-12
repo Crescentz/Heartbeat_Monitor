@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 
 def _file_path() -> Path:
@@ -44,12 +44,15 @@ def set_ops_enabled(service_id: str, enabled: bool) -> None:
     tmp.replace(path)
 
 
-def seed_ops_enabled(service_ids: List[str], default_enabled: bool = True) -> None:
+def seed_ops_enabled(service_ids: List[str], default_enabled: bool = True, initial_map: Optional[Dict[str, bool]] = None) -> None:
     path = _file_path()
     if path.exists():
         return
     path.parent.mkdir(parents=True, exist_ok=True)
-    data = {str(sid): bool(default_enabled) for sid in service_ids}
+    if isinstance(initial_map, dict):
+        data = {str(sid): bool(initial_map.get(str(sid), default_enabled)) for sid in service_ids}
+    else:
+        data = {str(sid): bool(default_enabled) for sid in service_ids}
     tmp = path.with_suffix(path.suffix + ".tmp")
     tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
     tmp.replace(path)

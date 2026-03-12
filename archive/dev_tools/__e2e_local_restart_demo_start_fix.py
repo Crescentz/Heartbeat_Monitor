@@ -21,6 +21,7 @@ def main() -> int:
     if isinstance(getattr(svc, "config", None), dict):
         svc.config["_disabled"] = False
         svc.config["_ops_enabled"] = True
+        svc.config["start_restart_on_running"] = True
 
     ok, msg = engine.control(sid, "start", allow_fix=False)
     if not ok:

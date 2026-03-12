@@ -9,6 +9,7 @@
 - **services/localproc_service.py**：本机子进程服务实现（HTTP 检测 + 本机启停/重启），用于跨平台本机样例或无需 SSH 的场景
 - **services/<plugin>_service.py**：插件服务实现（复杂检测/非标准接口/多步调用/文件上传等）
 - **core/monitor_engine.py**：对外提供 `check_one / check_all / control`，Web 与定时任务都只调用它
+- **core/runtime_state.py**：统一收敛 `auto_check / ops_enabled / disabled / failure_policy` 运行时状态，保证页面与调度器口径一致
 - **monitor/webapp.py + templates/index.html**：Web 运维界面
 - **core/error_log.py**：错误日志落盘与最近 N 条查询
 - **core/user_store.py + core/acl_store.py**：账号与权限（超管/普通用户、服务绑定）
@@ -43,7 +44,7 @@
 - `data/service_bindings.json`：服务与用户绑定关系
 - `data/schedule_overrides.json`：前台设置的检测频率覆盖值
 - `data/service_disabled.json`：服务禁用开关（超管前台设置）
-- `data/service_auto_check.json`：服务级自动检测开关（纳管后默认关闭；开启后才创建定时任务）
+- `data/service_auto_check.json`：服务级自动检测开关（按 YAML 的 `auto_check` 初始化；字段缺失时默认关闭）
 - `data/service_failure_policy.json`：服务级失败策略覆盖（失败告警/自动重启）
 - `data/localproc_pids/`：本机子进程（localproc）PID 记录（用于程序重启后仍可 stop/restart）
 

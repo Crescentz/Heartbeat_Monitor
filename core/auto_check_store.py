@@ -44,7 +44,7 @@ def set_auto_check_enabled(service_id: str, enabled: bool) -> None:
     tmp.replace(path)
 
 
-def seed_auto_check_enabled(service_ids: List[str], default_enabled: bool = True, initial_map: Optional[Dict[str, bool]] = None) -> None:
+def seed_auto_check_enabled(service_ids: List[str], default_enabled: bool = False, initial_map: Optional[Dict[str, bool]] = None) -> None:
     path = _file_path()
     if path.exists():
         return

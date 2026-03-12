@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+from pathlib import Path
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
 from core.monitor_engine import MonitorEngine
 from core.service_loader import load_services_from_dir
 from monitor.webapp import create_app
@@ -31,4 +36,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

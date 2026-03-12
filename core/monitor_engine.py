@@ -1,12 +1,12 @@
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 from typing import Any, Dict, Iterable, Optional, Tuple
 
+from core.base_service import BaseService
 from core.error_log import append_error
 from core.event_log import append_event
-from core.base_service import BaseService
-import time
 
 
 @dataclass(frozen=True)
@@ -33,10 +33,12 @@ class MonitorEngine:
         if bool(getattr(service, "config", {}).get("_disabled", False)):
             append_event(service.service_id, service.name, "warn", "check", "Disabled")
             return CheckResult(False, "Disabled")
+
         try:
             ok, msg, detail = service.check_health()
         except Exception as e:
             ok, msg, detail = False, f"check_exception: {type(e).__name__}: {e}", {"exception": str(e), "type": type(e).__name__}
+
         auto_detail: Dict[str, Any] = {}
         if not ok:
             on_failure = str(service.config.get("on_failure") or "alert").lower()
@@ -57,6 +59,7 @@ class MonitorEngine:
                         }
                 else:
                     auto_detail = {"auto_action": "restart", "auto_ok": False, "auto_message": "restart not configured"}
+
         service.update_status(ok, msg, detail)
         if not ok:
             append_error(service.service_id, service.name, msg)
@@ -72,6 +75,22 @@ class MonitorEngine:
                     str(auto_detail.get("auto_message") or ""),
                     detail=auto_detail,
                 )
+                if bool(auto_detail.get("auto_ok")):
+                    wait_s = self._post_auto_restart_delay(service)
+                    append_event(
+                        service.service_id,
+                        service.name,
+                        "info",
+                        "restart_wait",
+                        f"wait {wait_s:.1f}s before re-check",
+                        detail={"delay_s": wait_s},
+                    )
+                    if wait_s > 0:
+                        time.sleep(wait_s)
+                    post_restart_ok, post_restart_message = self._check_after_restart(service)
+                    if post_restart_ok:
+                        return CheckResult(True, post_restart_message)
+                    return CheckResult(False, post_restart_message)
         else:
             append_event(service.service_id, service.name, "info", "check", "Healthy", detail=detail or {})
         return CheckResult(ok, msg or ("Healthy" if ok else "Unhealthy"))
@@ -148,3 +167,22 @@ class MonitorEngine:
             return True, f"Check complete: {'Healthy' if r.ok else 'Unhealthy'}; {r.message}".strip("; ")
         return False, "Unsupported action"
 
+    def _check_after_restart(self, service: BaseService) -> Tuple[bool, str]:
+        try:
+            ok, msg, detail = service.check_health()
+        except Exception as e:
+            ok, msg, detail = False, f"check_exception: {type(e).__name__}: {e}", {"exception": str(e), "type": type(e).__name__}
+        service.update_status(ok, msg, detail)
+        if ok:
+            append_event(service.service_id, service.name, "info", "check_after_restart", "Healthy", detail=detail or {})
+            return True, "Healthy after restart"
+        append_error(service.service_id, service.name, f"Post-restart check failed: {msg}")
+        append_event(service.service_id, service.name, "error", "check_after_restart", msg or "Unhealthy", detail=detail or {})
+        return False, msg or "Unhealthy"
+
+    def _post_auto_restart_delay(self, service: BaseService) -> float:
+        raw = getattr(service, "config", {}).get("post_auto_restart_check_delay_s", 5)
+        try:
+            return min(max(float(raw), 0.0), 120.0)
+        except Exception:
+            return 5.0

@@ -65,7 +65,7 @@ class BaseService(ABC):
         ops_capable = has_start or has_stop or has_restart
 
         category = str(config.get("category") or config.get("service_type") or "api").lower()
-        auto_check = bool(config.get("_auto_check_enabled", config.get("auto_check", True)))
+        auto_check = bool(config.get("_auto_check_enabled", config.get("auto_check", False)))
         on_failure = str(config.get("on_failure") or "alert").lower()
         auto_restart = (on_failure == "restart") and bool(config.get("auto_fix", True))
         check_schedule = str(config.get("check_schedule") or "").strip()

@@ -21,6 +21,7 @@ max_elapsed_ms: null
 local_cwd: ""
 local_script: "local_restart_api.py"
 local_args: []
+start_restart_on_running: true
 ops_doc:
   monitor: "本机健康检查：访问 http://127.0.0.1:18081/health，JSON ok=true 则认为正常。"
   restart_steps:

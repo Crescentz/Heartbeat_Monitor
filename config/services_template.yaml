@@ -17,7 +17,7 @@ host: "被监控服务器IP或域名"
 
 # ===== 1) 分类与检测（适用于所有服务）=====
 category: "api"  # 可选: api/web/other，用于界面分类展示
-auto_check: true
+auto_check: false  # 建议新服务先关闭，确认检测口径与权限后再从页面开启
 check_schedule: "30m"  # 10s/5m/1h/daily@02:30/weekly@mon 03:00；也可在管理界面填 off 关闭自动检测
 on_failure: "alert"  # alert=仅提示；restart=失败后自动重启（需要运维方式可用）
 auto_fix: true
